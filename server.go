@@ -10,23 +10,65 @@ import (
 	"time"
 )
 
-// Handler 是 ProtoQ 服务端的请求处理函数。
+// Handler 是 ProtoQ 服务端的请求处理函数（无连接上下文）。
 // opcode: 操作码
 // body: 请求体（可能为空）
 // 返回值：响应体（nil 表示空响应）、错误（非 nil 时发送错误响应或不响应）
 type Handler func(opcode uint32, body []byte) ([]byte, error)
 
+// ConnContext 表示一个 ProtoQ 连接上下文。
+// 在连接建立时创建，连接关闭时销毁。
+// 业务层可通过此对象获取连接标识、读写元数据、主动关闭连接。
+type ConnContext struct {
+	// ID 连接唯一标识（服务端内单调递增）
+	ID uint64
+
+	conn    net.Conn
+	decoder *Decoder
+
+	writeMu sync.Mutex
+	closed  atomic.Bool
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// metadata 连接级元数据（业务层可读写）
+	metadata map[string]interface{}
+	metaMu   sync.RWMutex
+
+	// 服务端引用
+	server *Server
+}
+
+// ConnHandler 是带连接上下文的请求处理函数。
+// ctx: 连接上下文（包含连接 ID、元数据）
+// opcode: 操作码
+// body: 请求体
+// 返回值：响应体、错误
+type ConnHandler func(ctx *ConnContext, opcode uint32, body []byte) ([]byte, error)
+
 // Server 是 ProtoQ 协议服务端。
 // 监听指定地址，接受连接并为每个连接创建处理循环。
 type Server struct {
+	// 无连接上下文的处理器（兼容旧 API）
 	handlers map[uint32]Handler
-	mu       sync.RWMutex
+
+	// 带连接上下文的处理器
+	connHandlers map[uint32]ConnHandler
+
+	mu sync.RWMutex
 
 	// 传输层工厂
 	listenerFactory ListenerFactory
 
 	// 配置
 	opcodeLen int
+
+	// OnConnect 连接建立后调用的钩子（可在构造后设置）
+	OnConnect func(ctx *ConnContext)
+
+	// OnClose 连接关闭前调用的钩子（可在构造后设置）
+	OnClose func(ctx *ConnContext)
 
 	// 活跃连接管理
 	conns   map[*serverConn]struct{}
@@ -40,7 +82,7 @@ type Server struct {
 	running atomic.Bool
 }
 
-// serverConn 表示一个服务端连接。
+// serverConn 表示一个服务端连接（内部类型）。
 type serverConn struct {
 	id      uint64
 	conn    net.Conn
@@ -56,6 +98,9 @@ type serverConn struct {
 
 	// 读循环完成
 	readDone chan struct{}
+
+	// 公开的连接上下文
+	pubCtx *ConnContext
 }
 
 // ServerOption 是 Server 的配置选项。
@@ -66,11 +111,22 @@ func WithServerOpcodeLen(n int) ServerOption {
 	return func(s *Server) { s.opcodeLen = n }
 }
 
+// WithOnConnect 设置连接建立时的回调。
+func WithOnConnect(fn func(ctx *ConnContext)) ServerOption {
+	return func(s *Server) { s.OnConnect = fn }
+}
+
+// WithOnClose 设置连接关闭时的回调。
+func WithOnClose(fn func(ctx *ConnContext)) ServerOption {
+	return func(s *Server) { s.OnClose = fn }
+}
+
 // NewServer 创建一个 ProtoQ 服务端。
 func NewServer(factory ListenerFactory, opts ...ServerOption) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		handlers:        make(map[uint32]Handler),
+		connHandlers:    make(map[uint32]ConnHandler),
 		listenerFactory: factory,
 		opcodeLen:       DefaultOpcodeLen,
 		conns:           make(map[*serverConn]struct{}),
@@ -83,7 +139,7 @@ func NewServer(factory ListenerFactory, opts ...ServerOption) *Server {
 	return s
 }
 
-// Handle 注册指定 Opcode 的处理函数。
+// Handle 注册指定 Opcode 的处理函数（无连接上下文）。
 // 多次注册同一个 Opcode 会覆盖之前的处理函数。
 func (s *Server) Handle(opcode uint32, handler Handler) {
 	s.mu.Lock()
@@ -91,12 +147,24 @@ func (s *Server) Handle(opcode uint32, handler Handler) {
 	s.handlers[opcode] = handler
 }
 
-// getHandler 获取指定 Opcode 的处理函数。
-func (s *Server) getHandler(opcode uint32) (Handler, bool) {
+// HandleConn 注册指定 Opcode 的带连接上下文的处理函数。
+// ConnHandler 优先级高于 Handler：若同一 Opcode 同时注册了两者，优先使用 ConnHandler。
+func (s *Server) HandleConn(opcode uint32, handler ConnHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connHandlers[opcode] = handler
+}
+
+// getHandler 获取指定 Opcode 的处理函数（ConnHandler 优先）。
+func (s *Server) getHandler(opcode uint32) (Handler, bool, ConnHandler, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	h, ok := s.handlers[opcode]
-	return h, ok
+	ch, chOk := s.connHandlers[opcode]
+	if chOk {
+		return nil, false, ch, true
+	}
+	h, hOk := s.handlers[opcode]
+	return h, hOk, nil, false
 }
 
 // ListenAndServe 开始监听并服务请求。
@@ -132,7 +200,6 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 			case <-s.ctx.Done():
 				return nil
 			default:
-				// 临时错误，继续接受
 				if ne, ok := err.(net.Error); ok && ne.Temporary() {
 					time.Sleep(100 * time.Millisecond)
 					continue
@@ -141,20 +208,43 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 			}
 		}
 
-		sc := &serverConn{
-			id:      connID.Add(1),
-			conn:    conn,
-			decoder: NewDecoder(conn),
-			server:  s,
-			ctx:     s.ctx,
-			readDone: make(chan struct{}),
-		}
-
+		sc := s.newServerConn(conn, connID.Add(1))
 		s.connsMu.Lock()
 		s.conns[sc] = struct{}{}
 		s.connsMu.Unlock()
 
+		// 调用连接建立钩子
+		if s.OnConnect != nil {
+			s.OnConnect(sc.pubCtx)
+		}
+
 		go sc.serve()
+	}
+}
+
+// newServerConn 创建内部连接对象及其公开上下文。
+func (s *Server) newServerConn(conn net.Conn, id uint64) *serverConn {
+	connCtx, connCancel := context.WithCancel(s.ctx)
+
+	pubCtx := &ConnContext{
+		ID:       id,
+		conn:     conn,
+		decoder:  NewDecoder(conn),
+		ctx:      connCtx,
+		cancel:   connCancel,
+		metadata: make(map[string]interface{}),
+		server:   s,
+	}
+
+	return &serverConn{
+		id:       id,
+		conn:     conn,
+		decoder:  pubCtx.decoder, // 共用解码器
+		server:   s,
+		ctx:      connCtx,
+		cancel:   connCancel,
+		readDone: make(chan struct{}),
+		pubCtx:   pubCtx,
 	}
 }
 
@@ -169,7 +259,6 @@ func (s *Server) Shutdown() error {
 	}
 	s.connsMu.Unlock()
 
-	// 关闭所有连接
 	for _, sc := range conns {
 		sc.conn.Close()
 	}
@@ -179,14 +268,7 @@ func (s *Server) Shutdown() error {
 
 // serve 处理单个连接。
 func (sc *serverConn) serve() {
-	defer func() {
-		sc.conn.Close()
-		close(sc.readDone)
-
-		sc.server.connsMu.Lock()
-		delete(sc.server.conns, sc)
-		sc.server.connsMu.Unlock()
-	}()
+	defer sc.cleanup()
 
 	for {
 		frame, err := sc.decoder.Decode()
@@ -198,39 +280,64 @@ func (sc *serverConn) serve() {
 			case <-sc.ctx.Done():
 				return
 			default:
-				// 解析错误，尝试继续
 				continue
 			}
 		}
 
-		// 只处理请求帧
 		if !frame.IsRequest() {
 			continue
 		}
 
-		// 查找处理函数
-		handler, ok := sc.server.getHandler(frame.Opcode)
-		if !ok {
-			// 无处理函数，如果是需要应答的请求则发送错误响应
+		// 优先查找 ConnHandler
+		h, hOk, ch, chOk := sc.server.getHandler(frame.Opcode)
+
+		if chOk {
+			// 使用带连接上下文的处理器
+			if frame.NeedsAck() {
+				go sc.handleConnRequest(frame, ch)
+			} else {
+				go ch(sc.pubCtx, frame.Opcode, frame.Body)
+			}
+		} else if hOk {
+			// 使用无连接上下文的处理器（兼容旧 API）
+			if frame.NeedsAck() {
+				go sc.handleRequest(frame, h)
+			} else {
+				go func(f *Frame, handler Handler) {
+					handler(f.Opcode, f.Body)
+				}(frame, h)
+			}
+		} else {
+			// 无处理函数
 			if frame.NeedsAck() {
 				sc.sendErrorResponse(frame, fmt.Errorf("unknown opcode: %d", frame.Opcode))
 			}
-			continue
-		}
-
-		if frame.NeedsAck() {
-			// 需要应答：调用处理函数并发送响应
-			go sc.handleRequest(frame, handler)
-		} else {
-			// 通知：异步处理
-			go func(f *Frame, h Handler) {
-				h(f.Opcode, f.Body)
-			}(frame, handler)
 		}
 	}
 }
 
-// handleRequest 处理需要应答的请求。
+// handleConnRequest 使用 ConnHandler 处理需要应答的请求。
+func (sc *serverConn) handleConnRequest(frame *Frame, handler ConnHandler) {
+	respBody, err := handler(sc.pubCtx, frame.Opcode, frame.Body)
+	if err != nil {
+		// 若有响应体则发送它（如协商拒绝的 JSON），否则发送错误消息
+		body := respBody
+		if len(body) == 0 {
+			body = []byte(err.Error())
+		}
+		resp := NewResponseFrame(frame.Opcode, frame.Seq, body, frame.Flags)
+		resp.Flags = resp.Flags.SetOpcodeLen(sc.server.opcodeLen)
+		sc.writeFrame(resp)
+		return
+	}
+
+	resp := NewResponseFrame(frame.Opcode, frame.Seq, respBody, frame.Flags)
+	resp.Flags = resp.Flags.SetOpcodeLen(sc.server.opcodeLen)
+
+	sc.writeFrame(resp)
+}
+
+// handleRequest 处理需要应答的请求（传统 Handler）。
 func (sc *serverConn) handleRequest(frame *Frame, handler Handler) {
 	respBody, err := handler(frame.Opcode, frame.Body)
 	if err != nil {
@@ -241,10 +348,7 @@ func (sc *serverConn) handleRequest(frame *Frame, handler Handler) {
 	resp := NewResponseFrame(frame.Opcode, frame.Seq, respBody, frame.Flags)
 	resp.Flags = resp.Flags.SetOpcodeLen(sc.server.opcodeLen)
 
-	if err := sc.writeFrame(resp); err != nil {
-		// 写入失败，连接可能已断开
-		return
-	}
+	sc.writeFrame(resp)
 }
 
 // sendErrorResponse 发送错误响应。
@@ -263,6 +367,79 @@ func (sc *serverConn) writeFrame(f *Frame) error {
 	sc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, err := EncodeTo(f, sc.conn)
 	return err
+}
+
+// cleanup 清理连接资源。
+func (sc *serverConn) cleanup() {
+	// 调用关闭钩子（若 pubCtx 存在）
+	if sc.pubCtx != nil && sc.server.OnClose != nil {
+		sc.server.OnClose(sc.pubCtx)
+	}
+
+	sc.conn.Close()
+	if sc.cancel != nil {
+		sc.cancel()
+	}
+	close(sc.readDone)
+
+	sc.server.connsMu.Lock()
+	delete(sc.server.conns, sc)
+	sc.server.connsMu.Unlock()
+}
+
+// ──────────────────────────────────────────────
+// ConnContext 公开方法
+// ──────────────────────────────────────────────
+
+// Set 设置连接级元数据。
+func (c *ConnContext) Set(key string, value interface{}) {
+	c.metaMu.Lock()
+	defer c.metaMu.Unlock()
+	c.metadata[key] = value
+}
+
+// Get 获取连接级元数据。
+func (c *ConnContext) Get(key string) (interface{}, bool) {
+	c.metaMu.RLock()
+	defer c.metaMu.RUnlock()
+	v, ok := c.metadata[key]
+	return v, ok
+}
+
+// GetString 获取字符串类型的连接元数据。
+func (c *ConnContext) GetString(key string) (string, bool) {
+	v, ok := c.Get(key)
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+// Close 主动关闭连接（幂等）。
+func (c *ConnContext) Close() error {
+	if c.closed.Swap(true) {
+		return nil
+	}
+	c.cancel()
+	return c.conn.Close()
+}
+
+// WriteFrame 向连接写入一个帧（线程安全）。
+func (c *ConnContext) WriteFrame(f *Frame) error {
+	if c.closed.Load() {
+		return ErrConnClosed
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := EncodeTo(f, c.conn)
+	return err
+}
+
+// Context 返回连接的 context.Context（用于超时控制）。
+func (c *ConnContext) Context() context.Context {
+	return c.ctx
 }
 
 // ActiveConns 返回当前活跃连接数。
