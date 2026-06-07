@@ -190,27 +190,39 @@ for {
 
 ```
 protoq/
-├── go.mod                  # Go 模块定义
-├── doc.go                  # 包文档
-├── flags.go                # Flags 位图定义与操作
-├── errors.go               # 错误类型
-├── crc.go                  # CRC-16-IBM / CRC-32-IEEE
-├── frame.go                # Frame 结构体与工厂方法
-├── encoder.go              # 帧编码器（含对齐填充）
-├── decoder.go              # 流式解码器状态机
-├── seq.go                  # 序列号管理与重传
-├── transport.go            # Transport 接口定义
-├── transport_tcp.go        # TCP 传输实现
-├── transport_ws.go         # WebSocket 传输实现（纯标准库）
-├── transport_quic.go       # QUIC 传输桩
-├── client.go               # 客户端
-├── server.go               # 服务端
-├── protoq_test.go          # 单元测试（12 项）
-├── DESIGN.md               # 详细设计文档
-├── README.md               # 本文件
-└── examples/
-    └── echo/
-        └── main.go         # Echo 服务端/客户端示例
+├── go.mod                         # Go 模块定义
+├── doc.go                         # 包文档
+├── flags.go                       # Flags 位图定义与操作
+├── errors.go                      # 错误类型
+├── crc.go                         # CRC-16-IBM / CRC-32-IEEE
+├── frame.go                       # Frame 结构体与工厂方法
+├── encoder.go                     # 帧编码器（含对齐填充）
+├── decoder.go                     # 流式解码器状态机
+├── seq.go                         # 序列号管理与重传
+├── transport.go                   # Transport/Dialer/ListenerFactory 接口
+├── client.go                      # 客户端
+├── server.go                      # 服务端
+├── protoq_test.go                 # 单元测试（12 项）
+│
+├── transport/                     # 传输层实现子包
+│   ├── doc.go
+│   ├── transport_tcp.go           # TCP 传输
+│   ├── transport_ws.go            # WebSocket 传输（纯标准库 RFC 6455）
+│   └── transport_quic.go          # QUIC 桩（预留）
+│
+├── biz/                           # 业务协议层（类型安全 Handler / 路由 / 中间件）
+│   ├── doc.go
+│   └── opcode.go                  # 业务 Opcode 常量
+│
+├── examples/                      # 教学示例
+│   └── echo/
+│       └── main.go
+│
+├── apps/                          # 应用入口（预留）
+│   └── .gitkeep
+│
+├── DESIGN.md                      # 详细设计文档
+└── README.md                      # 本文件
 ```
 
 ## 配置选项
