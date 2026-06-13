@@ -12,14 +12,10 @@ import (
 // Client 是 ProtoQ 协议客户端。
 // 支持通过 TCP 或 WebSocket 连接到服务端，发送请求和通知。
 type Client struct {
-	// Conn 共享连接抽象（嵌入）
+	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
 	*Conn
 
 	seqMgr *SeqManager
-
-	// 停止信号
-	ctx    context.Context
-	cancel context.CancelFunc
 
 	// 读循环完成信号
 	readDone chan struct{}
@@ -59,12 +55,9 @@ func WithClientCRC(enable bool) ClientOption {
 // NewClient 创建一个 ProtoQ 客户端。
 // rawConn 是已建立的连接（由 Transport.Dial 返回）。
 func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
-	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
-		Conn:      NewConn(rawConn),
+		Conn:      NewConn(context.Background(), rawConn),
 		seqMgr:    NewSeqManager(DefaultSeqLen),
-		ctx:       ctx,
-		cancel:    cancel,
 		readDone:  make(chan struct{}),
 		opcodeLen: DefaultOpcodeLen,
 		seqLen:    DefaultSeqLen,
@@ -160,6 +153,7 @@ func (c *Client) readLoop() {
 }
 
 // Close 关闭客户端连接。
+// Conn.Close() 取消 context 并关闭底层连接（幂等）。
 func (c *Client) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
@@ -168,7 +162,6 @@ func (c *Client) Close() error {
 		return nil
 	}
 
-	c.cancel()
 	c.seqMgr.Close()
 	err := c.Conn.Close()
 	<-c.readDone

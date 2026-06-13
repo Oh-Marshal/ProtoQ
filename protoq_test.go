@@ -283,7 +283,7 @@ func TestRequestResponseMatching(t *testing.T) {
 
 	// 手动创建服务端连接处理
 	sc := &ConnContext{
-		Conn:   NewConn(srvPipe),
+		Conn:   NewConn(context.Background(), srvPipe),
 		ID:     1,
 		server: server,
 	}
@@ -332,7 +332,7 @@ func TestMultipleRequests(t *testing.T) {
 	})
 
 	sc := &ConnContext{
-		Conn:   NewConn(srvPipe),
+		Conn:   NewConn(context.Background(), srvPipe),
 		ID:     1,
 		server: server,
 	}

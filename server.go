@@ -10,18 +10,15 @@ import (
 	"time"
 )
 
-// ConnContext 表示一个 ProtoQ 连接上下文。
+// ConnContext 表示一个 ProtoQ 服务端连接上下文。
 // 在连接建立时创建，连接关闭时销毁。
-// 业务层可通过此对象获取连接标识、读写元数据、主动关闭连接。
+// 嵌入 Conn 获得完整的连接生命周期管理（读写、关闭、context 取消）。
 type ConnContext struct {
-	// Conn 共享连接抽象（嵌入）
+	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
 	*Conn
 
 	// ID 连接唯一标识（服务端内单调递增）
 	ID uint64
-
-	ctx    context.Context
-	cancel context.CancelFunc
 
 	// metadata 连接级元数据（业务层可读写）
 	metadata map[string]interface{}
@@ -168,14 +165,11 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 }
 
 // newConnContext 为新连接创建 ConnContext。
+// 连接的 context 派生于服务端的 context，服务端关闭时所有连接自动取消。
 func (s *Server) newConnContext(rawConn net.Conn, id uint64) *ConnContext {
-	connCtx, connCancel := context.WithCancel(s.ctx)
-
 	return &ConnContext{
-		Conn:     NewConn(rawConn),
+		Conn:     NewConn(s.ctx, rawConn),
 		ID:       id,
-		ctx:      connCtx,
-		cancel:   connCancel,
 		metadata: make(map[string]interface{}),
 		server:   s,
 	}
@@ -210,7 +204,7 @@ func (ctx *ConnContext) serve() {
 				return
 			}
 			select {
-			case <-ctx.ctx.Done():
+			case <-ctx.Context().Done():
 				return
 			default:
 				continue
@@ -280,10 +274,8 @@ func (ctx *ConnContext) cleanup() {
 		ctx.server.OnClose(ctx)
 	}
 
+	// Conn.Close() 取消 context 并关闭底层连接（幂等）
 	ctx.Conn.Close()
-	if ctx.cancel != nil {
-		ctx.cancel()
-	}
 
 	ctx.server.connsMu.Lock()
 	delete(ctx.server.conns, ctx)
@@ -319,15 +311,9 @@ func (c *ConnContext) GetString(key string) (string, bool) {
 	return s, ok
 }
 
-// Close 主动关闭连接（幂等）。同时取消关联的 context。
+// Close 主动关闭连接（幂等）。委托给 Conn.Close()，会自动取消 context。
 func (c *ConnContext) Close() error {
-	c.cancel()
 	return c.Conn.Close()
-}
-
-// Context 返回连接的 context.Context（用于超时控制）。
-func (c *ConnContext) Context() context.Context {
-	return c.ctx
 }
 
 // ActiveConns 返回当前活跃连接数。
