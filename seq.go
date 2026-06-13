@@ -2,23 +2,8 @@ package protoq
 
 import (
 	"context"
-	"math"
 	"sync"
 	"time"
-)
-
-const (
-	// DefaultRetryTimeout 默认重传初始超时
-	DefaultRetryTimeout = 1 * time.Second
-
-	// MaxRetries 最大重传次数
-	MaxRetries = 3
-
-	// MaxSeq16 16 位序列号最大值
-	MaxSeq16 = math.MaxUint16
-
-	// MaxSeq32 32 位序列号最大值
-	MaxSeq32 = math.MaxUint32
 )
 
 // PendingRequest 表示一个等待应答的请求。

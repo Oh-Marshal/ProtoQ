@@ -226,26 +226,26 @@ func TestCRCMismatch(t *testing.T) {
 func TestFlagsValidation(t *testing.T) {
 	// ACK_REQ=1 但 SEQ_LEN=0
 	f := &Frame{
-		Flags:  FlagACKREQ | FlagOPLEN2 | FlagSEQLEN0 | FlagCRCLEN2 | FlagHASLEN,
+		Flags:  FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN0 | FlagCRCLEN2 | FlagHASLEN,
 		Opcode: 0x0001,
 		Seq:    0,
 		Body:   []byte("test"),
 	}
 	_, err := Encode(f)
-	if err != ErrACKReqNeedsSeq {
-		t.Errorf("expected ErrACKReqNeedsSeq, got %v", err)
+	if err != ErrRequiresAckNeedsSeq {
+		t.Errorf("expected ErrRequiresAckNeedsSeq, got %v", err)
 	}
 
 	// 响应帧中 ACK_REQ=1
 	f2 := &Frame{
-		Flags:  FlagDIR | FlagACKREQ | FlagOPLEN2 | FlagSEQLEN2 | FlagCRCLEN2,
+		Flags:  FlagDIR | FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN2 | FlagCRCLEN2,
 		Opcode: 0x0001,
 		Seq:    0x0001,
 		Body:   nil,
 	}
 	_, err = Encode(f2)
-	if err != ErrResponseCantAckReq {
-		t.Errorf("expected ErrResponseCantAckReq, got %v", err)
+	if err != ErrResponseRequiresAck {
+		t.Errorf("expected ErrResponseRequiresAck, got %v", err)
 	}
 }
 

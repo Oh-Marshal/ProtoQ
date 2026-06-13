@@ -217,13 +217,13 @@ func (ctx *ConnContext) serve() {
 
 		handler, ok := ctx.server.lookupHandler(frame.Opcode)
 		if !ok {
-			if frame.NeedsAck() {
+			if frame.RequiresAck() {
 				ctx.sendErrorResponse(frame, fmt.Errorf("unknown opcode: %d", frame.Opcode))
 			}
 			continue
 		}
 
-		if frame.NeedsAck() {
+		if frame.RequiresAck() {
 			go ctx.handleRequest(frame, handler)
 		} else {
 			go handler(ctx, frame.Opcode, frame.Body)

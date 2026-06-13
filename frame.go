@@ -38,7 +38,7 @@ func NewRequestFrame(opcode uint32, seq uint32, body []byte, needAck bool, crc b
 		if seqLen == 0 {
 			seqLen = 2 // 需要应答时至少 2 字节 Seq
 		}
-		f.Flags = f.Flags.SetAckReq(true)
+		f.Flags = f.Flags.SetRequiresAck(true)
 	}
 	f.Flags = f.Flags.SetSeqLen(seqLen)
 
@@ -62,7 +62,7 @@ func NewResponseFrame(opcode uint32, seq uint32, body []byte, requestFlags Flags
 	seqLen := requestFlags.SeqLen() // 使用请求中的 Seq 长度
 
 	f.Flags = f.Flags.SetDir(true)     // 响应
-	f.Flags = f.Flags.SetAckReq(false) // 响应不能要求应答
+	f.Flags = f.Flags.SetRequiresAck(false) // 响应不能要求应答
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
 	f.Flags = f.Flags.SetSeqLen(seqLen)
 	f.Flags = f.Flags.SetHasLen(len(body) > 0)
@@ -86,7 +86,7 @@ func NewNotificationFrame(opcode uint32, body []byte, crc bool) *Frame {
 	opLen := fieldLen(opcode)
 
 	f.Flags = f.Flags.SetDir(false)
-	f.Flags = f.Flags.SetAckReq(false)
+	f.Flags = f.Flags.SetRequiresAck(false)
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
 	f.Flags = f.Flags.SetSeqLen(0) // 无需序列号
 	f.Flags = f.Flags.SetHasLen(len(body) > 0)
@@ -104,8 +104,8 @@ func (f *Frame) IsRequest() bool { return f.Flags.IsRequest() }
 // IsResponse 返回是否为响应帧。
 func (f *Frame) IsResponse() bool { return f.Flags.IsResponse() }
 
-// NeedsAck 返回是否需要应答。
-func (f *Frame) NeedsAck() bool { return f.Flags.AckReq() }
+// RequiresAck 返回是否需要应答。
+func (f *Frame) RequiresAck() bool { return f.Flags.RequiresAck() }
 
 // String 返回帧的简要描述。
 func (f *Frame) String() string {
@@ -114,7 +114,7 @@ func (f *Frame) String() string {
 		dir = "RESP"
 	}
 	ack := ""
-	if f.NeedsAck() {
+	if f.RequiresAck() {
 		ack = " ACK"
 	}
 	return fmt.Sprintf("[%s%s Opcode=%d Seq=%d BodyLen=%d]",

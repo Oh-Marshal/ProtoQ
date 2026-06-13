@@ -312,5 +312,3 @@ func (d *Decoder) FramesDecoded() uint64 {
 func (d *Decoder) BytesConsumed() uint64 {
 	return d.bytesConsumed
 }
-
-const readBufferSize = 4096
