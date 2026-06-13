@@ -120,7 +120,7 @@ func TestEndToEnd_NegotiateAndCall(t *testing.T) {
 
 	var callCount atomic.Uint64
 	echoOpcode := uint32(0x0100)
-	server.Handle(echoOpcode, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(echoOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		callCount.Add(1)
 		return append([]byte("ECHO:"), body...), nil
 	})
@@ -170,7 +170,7 @@ func TestEndToEnd_Notify(t *testing.T) {
 
 	notifyOpcode := uint32(0x0101)
 	received := make(chan []byte, 1)
-	server.Handle(notifyOpcode, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(notifyOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		received <- body
 		return nil, nil
 	})
@@ -238,7 +238,7 @@ func TestEndToEnd_CustomNegotiator_Accept(t *testing.T) {
 	recipe := &biz.ServerRecipe{Negotiator: &tokenNegotiator{requiredToken: "secret"}}
 	recipe.Apply(server)
 
-	server.Handle(0x0100, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0100, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return body, nil
 	})
 
@@ -317,7 +317,7 @@ func TestCallWithoutNegotiate(t *testing.T) {
 	defer client.Close()
 
 	// 发非协商的请求（注册了业务 handler）
-	server.Handle(0x0100, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0100, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return []byte("pong"), nil
 	})
 
@@ -380,7 +380,7 @@ func TestMultipleClients(t *testing.T) {
 	recipe.Apply(server)
 
 	echoOpcode := uint32(0x0100)
-	server.Handle(echoOpcode, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(echoOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return append([]byte("ECHO:"), body...), nil
 	})
 
@@ -532,7 +532,7 @@ func TestConnHandler_ContextMetadata(t *testing.T) {
 	// 使用 ConnHandler 注册业务操作码，验证连接上下文可访问
 	connAwareOpcode := uint32(0x0100)
 	metaCh := make(chan string, 1)
-	server.HandleConn(connAwareOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(connAwareOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		// 从连接上下文读取 session_id（由协商阶段写入）
 		sid, _ := ctx.GetString("session_id")
 		metaCh <- sid

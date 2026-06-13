@@ -24,7 +24,7 @@
 //	recipe.Apply(server)
 //
 //	server.Handle(0x0100, echoHandler)        // 业务操作码
-//	server.HandleConn(0x0101, connAwareHandler) // 带连接上下文的业务操作码（可选）
+//	server.Handle(0x0101, connAwareHandler) // 带连接上下文的业务操作码
 //
 //	server.ListenAndServe(ctx, ":9090")
 //

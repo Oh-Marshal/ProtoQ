@@ -274,20 +274,18 @@ func TestRequestResponseMatching(t *testing.T) {
 
 	// 服务端
 	server := NewServer(nil) // nil factory — 只使用连接级处理
-	server.Handle(0x0001, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0001, func(ctx *ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return []byte("echo: " + string(body)), nil
 	})
-	server.Handle(0x0002, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0002, func(ctx *ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return nil, nil // 空响应
 	})
 
 	// 手动创建服务端连接处理
-	sc := &serverConn{
-		id:      1,
-		conn:    srvPipe,
-		decoder: NewDecoder(srvPipe),
-		server:  server,
-		readDone: make(chan struct{}),
+	sc := &ConnContext{
+		Conn:   NewConn(srvPipe),
+		ID:     1,
+		server: server,
 	}
 	go sc.serve()
 
@@ -327,18 +325,16 @@ func TestMultipleRequests(t *testing.T) {
 	defer clientConn.Close()
 
 	server := NewServer(nil)
-	server.Handle(0x0001, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0001, func(ctx *ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		// 模拟一些处理时间
 		time.Sleep(10 * time.Millisecond)
 		return body, nil
 	})
 
-	sc := &serverConn{
-		id:      1,
-		conn:    srvPipe,
-		decoder: NewDecoder(srvPipe),
-		server:  server,
-		readDone: make(chan struct{}),
+	sc := &ConnContext{
+		Conn:   NewConn(srvPipe),
+		ID:     1,
+		server: server,
 	}
 	go sc.serve()
 

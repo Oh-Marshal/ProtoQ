@@ -7,18 +7,15 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // Client 是 ProtoQ 协议客户端。
 // 支持通过 TCP 或 WebSocket 连接到服务端，发送请求和通知。
 type Client struct {
-	conn    net.Conn
-	decoder *Decoder
-	seqMgr  *SeqManager
+	// Conn 共享连接抽象（嵌入）
+	*Conn
 
-	// 写锁，确保帧写入的原子性
-	writeMu sync.Mutex
+	seqMgr *SeqManager
 
 	// 停止信号
 	ctx    context.Context
@@ -27,8 +24,7 @@ type Client struct {
 	// 读循环完成信号
 	readDone chan struct{}
 
-	// 连接状态
-	closed  atomic.Bool
+	// 关闭同步（Close 需等待 readLoop 退出）
 	closeMu sync.RWMutex
 
 	// 配置
@@ -61,16 +57,15 @@ func WithClientCRC(enable bool) ClientOption {
 }
 
 // NewClient 创建一个 ProtoQ 客户端。
-// conn 是已建立的连接（由 Transport.Dial 返回）。
-func NewClient(conn net.Conn, opts ...ClientOption) *Client {
+// rawConn 是已建立的连接（由 Transport.Dial 返回）。
+func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
-		conn:     conn,
-		decoder:  NewDecoder(conn),
-		seqMgr:   NewSeqManager(DefaultSeqLen),
-		ctx:      ctx,
-		cancel:   cancel,
-		readDone: make(chan struct{}),
+		Conn:      NewConn(rawConn),
+		seqMgr:    NewSeqManager(DefaultSeqLen),
+		ctx:       ctx,
+		cancel:    cancel,
+		readDone:  make(chan struct{}),
 		opcodeLen: DefaultOpcodeLen,
 		seqLen:    DefaultSeqLen,
 		useCRC:    true,
@@ -91,7 +86,7 @@ func NewClient(conn net.Conn, opts ...ClientOption) *Client {
 // 自动分配序列号，等待响应或超时。
 // ctx 用于请求级别的超时控制。
 func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*Frame, error) {
-	if c.closed.Load() {
+	if c.IsClosed() {
 		return nil, ErrConnClosed
 	}
 
@@ -101,7 +96,6 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 	}
 
 	frame := NewRequestFrame(opcode, seq, body, true, c.useCRC)
-	// 确保 Opcode 和 Seq 长度与客户端配置一致
 	frame.Flags = frame.Flags.SetOpcodeLen(c.opcodeLen)
 	frame.Flags = frame.Flags.SetSeqLen(c.seqLen)
 
@@ -109,7 +103,7 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 	pr := c.seqMgr.Enqueue(seq, frame)
 
 	// 发送
-	if err := c.writeFrame(frame); err != nil {
+	if err := c.WriteFrame(frame); err != nil {
 		c.seqMgr.Remove(seq)
 		return nil, WrapError("send request", err)
 	}
@@ -127,37 +121,23 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 
 // SendNotification 发送一个无需应答的单向通知。
 func (c *Client) SendNotification(opcode uint32, body []byte) error {
-	if c.closed.Load() {
+	if c.IsClosed() {
 		return ErrConnClosed
 	}
 
 	frame := NewNotificationFrame(opcode, body, c.useCRC)
 	frame.Flags = frame.Flags.SetOpcodeLen(c.opcodeLen)
 
-	if err := c.writeFrame(frame); err != nil {
+	if err := c.WriteFrame(frame); err != nil {
 		return WrapError("send notification", err)
 	}
 	c.notificationsSent.Add(1)
 	return nil
 }
 
-// writeFrame 线程安全地写入一个帧。
-func (c *Client) writeFrame(f *Frame) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-
-	if c.closed.Load() {
-		return ErrConnClosed
-	}
-
-	c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, err := EncodeTo(f, c.conn)
-	return err
-}
-
 // retransmit 重传帧（由 SeqManager 在超时时调用）。
 func (c *Client) retransmit(f *Frame) error {
-	return c.writeFrame(f)
+	return c.WriteFrame(f)
 }
 
 // readLoop 持续读取响应帧并分发。
@@ -165,17 +145,15 @@ func (c *Client) readLoop() {
 	defer close(c.readDone)
 
 	for {
-		frame, err := c.decoder.Decode()
+		frame, err := c.Decode()
 		if err != nil {
-			if err == io.EOF || c.closed.Load() {
+			if err == io.EOF || c.IsClosed() {
 				return
 			}
-			// 其他错误：尝试继续
 			continue
 		}
 
 		if frame.IsResponse() {
-			// 将响应交付给等待者
 			c.seqMgr.Resolve(frame.Seq, frame)
 		}
 	}
@@ -183,12 +161,16 @@ func (c *Client) readLoop() {
 
 // Close 关闭客户端连接。
 func (c *Client) Close() error {
-	c.closed.Store(true)
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+
+	if c.IsClosed() {
+		return nil
+	}
+
 	c.cancel()
 	c.seqMgr.Close()
-	c.writeMu.Lock()
-	err := c.conn.Close()
-	c.writeMu.Unlock()
+	err := c.Conn.Close()
 	<-c.readDone
 	return err
 }

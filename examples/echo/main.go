@@ -61,20 +61,20 @@ func runServer() {
 	server := protoq.NewServer(factory, protoq.WithServerOpcodeLen(2))
 
 	// 注册 Echo 处理函数 (Opcode 0x0001)
-	server.Handle(0x0001, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0001, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		log.Printf("[Echo] 收到请求: %s", string(body))
 		return []byte("ECHO: " + string(body)), nil
 	})
 
 	// 注册时间查询处理函数 (Opcode 0x0002)
-	server.Handle(0x0002, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0002, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		now := time.Now().Format(time.RFC3339)
 		log.Printf("[Time] 返回时间: %s", now)
 		return []byte(now), nil
 	})
 
 	// 注册状态查询 (Opcode 0x0003)
-	server.Handle(0x0003, func(opcode uint32, body []byte) ([]byte, error) {
+	server.Handle(0x0003, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		status := fmt.Sprintf("server up, conns=%d", server.ActiveConns())
 		return []byte(status), nil
 	})

@@ -87,9 +87,9 @@ func (r *ServerRecipe) Apply(server *protoq.Server) {
 	}
 
 	// 注册系统操作码
-	server.HandleConn(OpcodeNegotiate, r.makeNegotiateHandler(neg))
-	server.HandleConn(OpcodeHeartbeat, r.makeHeartbeatHandler(hbCfg))
-	server.HandleConn(OpcodeDisconnect, r.makeDisconnectHandler())
+	server.Handle(OpcodeNegotiate, r.makeNegotiateHandler(neg))
+	server.Handle(OpcodeHeartbeat, r.makeHeartbeatHandler(hbCfg))
+	server.Handle(OpcodeDisconnect, r.makeDisconnectHandler())
 
 	// 注册连接钩子
 	server.OnConnect = r.onConnect
