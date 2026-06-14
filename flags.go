@@ -20,23 +20,23 @@ package protoq
 type Flags byte
 
 // IsRequest 返回是否为请求帧（DIR=0）。
-func (f Flags) IsRequest() bool { return f&FlagDIR == 0 }
+func (f Flags) IsRequest() bool { return f&FlagDir == 0 }
 
 // IsResponse 返回是否为响应帧（DIR=1）。
-func (f Flags) IsResponse() bool { return f&FlagDIR != 0 }
+func (f Flags) IsResponse() bool { return f&FlagDir != 0 }
 
 // RequiresAck 返回是否需要应答（ACK_REQ=1）。
 func (f Flags) RequiresAck() bool { return f&FlagRequiresAck != 0 }
 
 // HasBodyLen 返回是否有 Body 长度字段（BODY_LEN=1）。
-func (f Flags) HasBodyLen() bool { return f&FlagBODYLEN != 0 }
+func (f Flags) HasBodyLen() bool { return f&FlagBodyLen != 0 }
 
 // OpcodeLen 返回 Opcode 字段的字节数（0、2 或 4）。
 func (f Flags) OpcodeLen() int {
-	switch f & FlagOPLENMask {
-	case FlagOPLEN2:
+	switch f & FlagOpLenMask {
+	case FlagOpLen2:
 		return 2
-	case FlagOPLEN4:
+	case FlagOpLen4:
 		return 4
 	default:
 		return 0
@@ -45,10 +45,10 @@ func (f Flags) OpcodeLen() int {
 
 // SeqLen 返回 Seq 字段的字节数（0、2 或 4）。
 func (f Flags) SeqLen() int {
-	switch f & FlagSEQLENMask {
-	case FlagSEQLEN2:
+	switch f & FlagSeqLenMask {
+	case FlagSeqLen2:
 		return 2
-	case FlagSEQLEN4:
+	case FlagSeqLen4:
 		return 4
 	default:
 		return 0
@@ -57,7 +57,7 @@ func (f Flags) SeqLen() int {
 
 // CRCLen 返回 CRC 字段的字节数（0 或 2）。
 func (f Flags) CRCLen() int {
-	if f&FlagCRCLENMask != 0 {
+	if f&FlagCRCLenMask != 0 {
 		return 2
 	}
 	return 0
@@ -66,9 +66,9 @@ func (f Flags) CRCLen() int {
 // SetDir 设置方向位。
 func (f Flags) SetDir(resp bool) Flags {
 	if resp {
-		return f | FlagDIR
+		return f | FlagDir
 	}
-	return f &^ FlagDIR
+	return f &^ FlagDir
 }
 
 // SetRequiresAck 设置应答请求位。
@@ -82,44 +82,44 @@ func (f Flags) SetRequiresAck(v bool) Flags {
 // SetBodyLen 设置 Body 长度字段存在位。
 func (f Flags) SetBodyLen(v bool) Flags {
 	if v {
-		return f | FlagBODYLEN
+		return f | FlagBodyLen
 	}
-	return f &^ FlagBODYLEN
+	return f &^ FlagBodyLen
 }
 
 // SetOpcodeLen 设置 Opcode 字段长度（0、2 或 4）。
 func (f Flags) SetOpcodeLen(n int) Flags {
-	f &^= FlagOPLENMask
+	f &^= FlagOpLenMask
 	switch n {
 	case 2:
-		return f | FlagOPLEN2
+		return f | FlagOpLen2
 	case 4:
-		return f | FlagOPLEN4
+		return f | FlagOpLen4
 	default:
-		return f | FlagOPLEN0
+		return f | FlagOpLen0
 	}
 }
 
 // SetSeqLen 设置 Seq 字段长度（0、2 或 4）。
 func (f Flags) SetSeqLen(n int) Flags {
-	f &^= FlagSEQLENMask
+	f &^= FlagSeqLenMask
 	switch n {
 	case 2:
-		return f | FlagSEQLEN2
+		return f | FlagSeqLen2
 	case 4:
-		return f | FlagSEQLEN4
+		return f | FlagSeqLen4
 	default:
-		return f | FlagSEQLEN0
+		return f | FlagSeqLen0
 	}
 }
 
 // SetCRCLen 设置 CRC 字段长度（0 或 2）。
 func (f Flags) SetCRCLen(n int) Flags {
-	f &^= FlagCRCLENMask
+	f &^= FlagCRCLenMask
 	if n > 0 {
-		return f | FlagCRCLEN2
+		return f | FlagCRCLen2
 	}
-	return f | FlagCRCLEN0
+	return f | FlagCRCLen0
 }
 
 // Validate 验证标志位的合法性。
@@ -145,11 +145,11 @@ func (f Flags) Validate(hasBody bool) error {
 func EncodeOpcodeLen(n int) Flags {
 	switch n {
 	case 2:
-		return FlagOPLEN2
+		return FlagOpLen2
 	case 4:
-		return FlagOPLEN4
+		return FlagOpLen4
 	default:
-		return FlagOPLEN0
+		return FlagOpLen0
 	}
 }
 
@@ -157,18 +157,18 @@ func EncodeOpcodeLen(n int) Flags {
 func EncodeSeqLen(n int) Flags {
 	switch n {
 	case 2:
-		return FlagSEQLEN2
+		return FlagSeqLen2
 	case 4:
-		return FlagSEQLEN4
+		return FlagSeqLen4
 	default:
-		return FlagSEQLEN0
+		return FlagSeqLen0
 	}
 }
 
 // EncodeCRCLen 将 CRC 长度编码为标志位 CRC 长度字段。
 func EncodeCRCLen(n int) Flags {
 	if n > 0 {
-		return FlagCRCLEN2
+		return FlagCRCLen2
 	}
-	return FlagCRCLEN0
+	return FlagCRCLen0
 }

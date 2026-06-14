@@ -22,7 +22,7 @@ func TestEncodeDecode(t *testing.T) {
 		},
 		{
 			name:  "响应有Body有CRC",
-			frame: NewResponseFrame(0x0001, 0x0001, []byte("world"), Flags(FlagOPLEN2|FlagSEQLEN2|FlagCRCLEN2)),
+			frame: NewResponseFrame(0x0001, 0x0001, []byte("world"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
 		},
 		{
 			name:  "通知无Body无CRC",
@@ -52,7 +52,7 @@ func TestEncodeDecode(t *testing.T) {
 		},
 		{
 			name:  "响应无Body",
-			frame: NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOPLEN2|FlagSEQLEN2|FlagCRCLEN2)),
+			frame: NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestDecodeStickyPackets(t *testing.T) {
 	// 构造多个帧并拼接在一起
 	f1 := NewRequestFrame(0x0001, 0x0001, []byte("first"), true, true)
 	f2 := NewNotificationFrame(0x0002, []byte("second"), true)
-	f3 := NewResponseFrame(0x0001, 0x0001, []byte("third"), Flags(FlagOPLEN2|FlagSEQLEN2|FlagCRCLEN2))
+	f3 := NewResponseFrame(0x0001, 0x0001, []byte("third"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
 
 	data1, _ := Encode(f1)
 	data2, _ := Encode(f2)
@@ -226,7 +226,7 @@ func TestCRCMismatch(t *testing.T) {
 func TestFlagsValidation(t *testing.T) {
 	// ACK_REQ=1 但 SEQ_LEN=0
 	f := &Frame{
-		Flags:  FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN0 | FlagCRCLEN2 | FlagBODYLEN,
+		Flags:  FlagRequiresAck | FlagOpLen2 | FlagSeqLen0 | FlagCRCLen2 | FlagBodyLen,
 		Opcode: 0x0001,
 		Seq:    0,
 		Body:   []byte("test"),
@@ -238,7 +238,7 @@ func TestFlagsValidation(t *testing.T) {
 
 	// 响应帧中 ACK_REQ=1
 	f2 := &Frame{
-		Flags:  FlagDIR | FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN2 | FlagCRCLEN2,
+		Flags:  FlagDir | FlagRequiresAck | FlagOpLen2 | FlagSeqLen2 | FlagCRCLen2,
 		Opcode: 0x0001,
 		Seq:    0x0001,
 		Body:   nil,
@@ -432,7 +432,7 @@ func TestEncoder4ByteAlignment(t *testing.T) {
 // TestVariantB 测试变体 B（无 Body，无 Length）
 func TestVariantB(t *testing.T) {
 	// 变体 B：响应无 Body，BODY_LEN=0
-	f := NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOPLEN2|FlagSEQLEN2|FlagCRCLEN2))
+	f := NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
 	// 确保 BODY_LEN 为 0
 	f.Flags = f.Flags.SetBodyLen(false)
 

@@ -23,45 +23,45 @@ const (
 // ─── 标志位编码（Flags 字节位布局，见 flags.go）──────────────────────────
 
 const (
-	// FlagDIR bit7：方向位；0=请求，1=响应
-	FlagDIR Flags = 1 << 7 // 0x80
+	// FlagDir bit7：方向位；0=请求，1=响应
+	FlagDir Flags = 1 << 7 // 0x80
 
 	// FlagRequiresAck bit6：需要确认位；1=需要对端响应
 	FlagRequiresAck Flags = 1 << 6 // 0x40
 
-	// FlagBODYLEN bit5：Body 长度字段存在位；1=有 Body 长度字段（变体 A），0=无（变体 B）
-	FlagBODYLEN Flags = 1 << 5 // 0x20
+	// FlagBodyLen bit5：Body 长度字段存在位；1=有 Body 长度字段（变体 A），0=无（变体 B）
+	FlagBodyLen Flags = 1 << 5 // 0x20
 
 	// ── Opcode 长度编码（bit4-3）─────────────────────────────────────────
 
-	// FlagOPLENMask Opcode 长度掩码（bit4-3）
-	FlagOPLENMask Flags = 0x18 // 0b00011000
-	// FlagOPLEN0 无 Opcode 字段
-	FlagOPLEN0 Flags = 0x00
-	// FlagOPLEN2 Opcode 占 2 字节
-	FlagOPLEN2 Flags = 0x08
-	// FlagOPLEN4 Opcode 占 4 字节
-	FlagOPLEN4 Flags = 0x10
+	// FlagOpLenMask Opcode 长度掩码（bit4-3）
+	FlagOpLenMask Flags = 0x18 // 0b00011000
+	// FlagOpLen0 无 Opcode 字段
+	FlagOpLen0 Flags = 0x00
+	// FlagOpLen2 Opcode 占 2 字节
+	FlagOpLen2 Flags = 0x08
+	// FlagOpLen4 Opcode 占 4 字节
+	FlagOpLen4 Flags = 0x10
 
 	// ── Seq 长度编码（bit2-1）────────────────────────────────────────────
 
-	// FlagSEQLENMask Seq 长度掩码（bit2-1）
-	FlagSEQLENMask Flags = 0x06 // 0b00000110
-	// FlagSEQLEN0 无 Seq 字段
-	FlagSEQLEN0 Flags = 0x00
-	// FlagSEQLEN2 Seq 占 2 字节
-	FlagSEQLEN2 Flags = 0x02
-	// FlagSEQLEN4 Seq 占 4 字节
-	FlagSEQLEN4 Flags = 0x04
+	// FlagSeqLenMask Seq 长度掩码（bit2-1）
+	FlagSeqLenMask Flags = 0x06 // 0b00000110
+	// FlagSeqLen0 无 Seq 字段
+	FlagSeqLen0 Flags = 0x00
+	// FlagSeqLen2 Seq 占 2 字节
+	FlagSeqLen2 Flags = 0x02
+	// FlagSeqLen4 Seq 占 4 字节
+	FlagSeqLen4 Flags = 0x04
 
 	// ── CRC 长度编码（bit0）──────────────────────────────────────────────
 
-	// FlagCRCLENMask CRC 长度掩码（bit0）
-	FlagCRCLENMask Flags = 0x01 // 0b00000001
-	// FlagCRCLEN0 无 CRC 字段
-	FlagCRCLEN0 Flags = 0x00
-	// FlagCRCLEN2 CRC 占 2 字节（CRC-16-IBM）
-	FlagCRCLEN2 Flags = 0x01
+	// FlagCRCLenMask CRC 长度掩码（bit0）
+	FlagCRCLenMask Flags = 0x01 // 0b00000001
+	// FlagCRCLen0 无 CRC 字段
+	FlagCRCLen0 Flags = 0x00
+	// FlagCRCLen2 CRC 占 2 字节（CRC-16-IBM）
+	FlagCRCLen2 Flags = 0x01
 )
 
 // ─── 默认配置值───────────────────────────────────────────────────────────
