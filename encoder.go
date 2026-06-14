@@ -18,7 +18,7 @@ func Encode(f *Frame) ([]byte, error) {
 	// 计算各段大小
 	// headerBeforeCRC = Magic(1) + Flags(1) + [Length(2)] + Opcode + Seq + Body
 	var lengthField int
-	if f.Flags.HasLength() {
+	if f.Flags.HasBodyLen() {
 		lengthField = 2
 	}
 	headerBeforeCRC := 1 + 1 + lengthField + opcodeLen + seqLen + len(f.Body)
@@ -40,7 +40,7 @@ func Encode(f *Frame) ([]byte, error) {
 	offset++
 
 	// Length (变体 A)
-	if f.Flags.HasLength() {
+	if f.Flags.HasBodyLen() {
 		// Length = Opcode + Seq + Body + CRC 的长度
 		payloadLen := opcodeLen + seqLen + len(f.Body) + crcLen
 		binary.BigEndian.PutUint16(buf[offset:], uint16(payloadLen))

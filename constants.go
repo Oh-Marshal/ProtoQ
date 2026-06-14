@@ -29,8 +29,8 @@ const (
 	// FlagRequiresAck bit6：需要确认位；1=需要对端响应
 	FlagRequiresAck Flags = 1 << 6 // 0x40
 
-	// FlagHASLEN bit5：长度字段存在位；1=有 Length 字段（变体 A），0=无（变体 B）
-	FlagHASLEN Flags = 1 << 5 // 0x20
+	// FlagBODYLEN bit5：Body 长度字段存在位；1=有 Body 长度字段（变体 A），0=无（变体 B）
+	FlagBODYLEN Flags = 1 << 5 // 0x20
 
 	// ── Opcode 长度编码（bit4-3）─────────────────────────────────────────
 

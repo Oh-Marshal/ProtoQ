@@ -20,8 +20,8 @@ var (
 	// ErrResponseRequiresAck 响应帧不能设置 ACK_REQ（响应不能要求再次应答）
 	ErrResponseRequiresAck = errors.New("protoq: response frame cannot set ACK_REQ")
 
-	// ErrBodyWithoutLength HAS_LEN=0 时不能有 Body（变体 B 必须无载荷）
-	ErrBodyWithoutLength = errors.New("protoq: body present but HAS_LEN is 0")
+	// ErrBodyWithoutLength BODY_LEN=0 时不能有 Body（变体 B 必须无载荷）
+	ErrBodyWithoutLength = errors.New("protoq: body present but BODY_LEN is 0")
 
 	// ErrInvalidLength Length 字段值小于 Opcode+Seq+CRC 最小长度
 	ErrInvalidLength = errors.New("protoq: invalid length field")

@@ -226,7 +226,7 @@ func TestCRCMismatch(t *testing.T) {
 func TestFlagsValidation(t *testing.T) {
 	// ACK_REQ=1 但 SEQ_LEN=0
 	f := &Frame{
-		Flags:  FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN0 | FlagCRCLEN2 | FlagHASLEN,
+		Flags:  FlagRequiresAck | FlagOPLEN2 | FlagSEQLEN0 | FlagCRCLEN2 | FlagBODYLEN,
 		Opcode: 0x0001,
 		Seq:    0,
 		Body:   []byte("test"),
@@ -431,19 +431,19 @@ func TestEncoder4ByteAlignment(t *testing.T) {
 
 // TestVariantB 测试变体 B（无 Body，无 Length）
 func TestVariantB(t *testing.T) {
-	// 变体 B：响应无 Body，HAS_LEN=0
+	// 变体 B：响应无 Body，BODY_LEN=0
 	f := NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOPLEN2|FlagSEQLEN2|FlagCRCLEN2))
-	// 确保 HAS_LEN 为 0
-	f.Flags = f.Flags.SetHasLen(false)
+	// 确保 BODY_LEN 为 0
+	f.Flags = f.Flags.SetBodyLen(false)
 
 	data, err := Encode(f)
 	if err != nil {
 		t.Fatalf("Encode failed: %v", err)
 	}
 
-	// 验证 HAS_LEN 位为 0
+	// 验证 BODY_LEN 位为 0
 	if data[1]&0x20 != 0 {
-		t.Error("HAS_LEN should be 0 for variant B")
+		t.Error("BODY_LEN should be 0 for variant B")
 	}
 
 	decoder := NewDecoder(bytes.NewReader(data))

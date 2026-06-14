@@ -5,7 +5,7 @@
 //
 //	bit7   DIR       0=请求, 1=响应
 //	bit6   ACK_REQ   1=需要应答
-//	bit5   HAS_LEN   1=有 Length 字段（变体 A），0=无（变体 B）
+//	bit5   BODY_LEN  1=有 Body 长度字段（变体 A），0=无（变体 B）
 //	bit4-3 OP_LEN    00=0字节, 01=2字节, 10=4字节
 //	bit2-1 SEQ_LEN   00=0字节, 01=2字节, 10=4字节
 //	bit0   CRC_LEN   0=无CRC, 1=2字节CRC-16-IBM
@@ -28,8 +28,8 @@ func (f Flags) IsResponse() bool { return f&FlagDIR != 0 }
 // RequiresAck 返回是否需要应答（ACK_REQ=1）。
 func (f Flags) RequiresAck() bool { return f&FlagRequiresAck != 0 }
 
-// HasLength 返回是否有 Length 字段（HAS_LEN=1）。
-func (f Flags) HasLength() bool { return f&FlagHASLEN != 0 }
+// HasBodyLen 返回是否有 Body 长度字段（BODY_LEN=1）。
+func (f Flags) HasBodyLen() bool { return f&FlagBODYLEN != 0 }
 
 // OpcodeLen 返回 Opcode 字段的字节数（0、2 或 4）。
 func (f Flags) OpcodeLen() int {
@@ -79,12 +79,12 @@ func (f Flags) SetRequiresAck(v bool) Flags {
 	return f &^ FlagRequiresAck
 }
 
-// SetHasLen 设置长度字段存在位。
-func (f Flags) SetHasLen(v bool) Flags {
+// SetBodyLen 设置 Body 长度字段存在位。
+func (f Flags) SetBodyLen(v bool) Flags {
 	if v {
-		return f | FlagHASLEN
+		return f | FlagBODYLEN
 	}
-	return f &^ FlagHASLEN
+	return f &^ FlagBODYLEN
 }
 
 // SetOpcodeLen 设置 Opcode 字段长度（0、2 或 4）。
@@ -127,7 +127,7 @@ func (f Flags) SetCRCLen(n int) Flags {
 // 约束：
 //   - ACK_REQ=1 时 SEQ_LEN 不能为 0（需要序列号来匹配响应）
 //   - 响应包（DIR=1）中 ACK_REQ 必须为 0（响应不能要求再次应答）
-//   - HAS_LEN=0 时不能有 Body（变体 B 必须无载荷）
+//   - BODY_LEN=0 时不能有 Body（变体 B 必须无载荷）
 func (f Flags) Validate(hasBody bool) error {
 	if f.RequiresAck() && f.SeqLen() == 0 {
 		return ErrRequiresAckNoSeq
@@ -135,7 +135,7 @@ func (f Flags) Validate(hasBody bool) error {
 	if f.IsResponse() && f.RequiresAck() {
 		return ErrResponseRequiresAck
 	}
-	if !f.HasLength() && hasBody {
+	if !f.HasBodyLen() && hasBody {
 		return ErrBodyWithoutLength
 	}
 	return nil

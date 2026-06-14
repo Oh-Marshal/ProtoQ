@@ -35,7 +35,7 @@ type Decoder struct {
 	curOpcodeLen  int
 	curSeqLen     int
 	curCRCLen     int
-	curHasLen     bool
+	curHasBodyLen bool
 	curLengthVal  uint16 // Length 字段值
 	curBodyLen    int    // 计算出的 Body 长度
 	curCRCOffset  int    // CRC 在帧中的起始偏移（相对于 buf 起始）
@@ -92,12 +92,12 @@ func (d *Decoder) Decode() (*Frame, error) {
 			d.bufPos = flagsPos + 1
 			d.bytesConsumed += uint64(d.bufPos - flagsPos)
 
-			d.curHasLen = d.curFlags.HasLength()
+			d.curHasBodyLen = d.curFlags.HasBodyLen()
 			d.curOpcodeLen = d.curFlags.OpcodeLen()
 			d.curSeqLen = d.curFlags.SeqLen()
 			d.curCRCLen = d.curFlags.CRCLen()
 
-			if d.curHasLen {
+			if d.curHasBodyLen {
 				d.state = stateLength
 			} else {
 				// 变体 B：无 Length，直接进入 Opcode
@@ -244,7 +244,7 @@ func (d *Decoder) buildFrame() (*Frame, error) {
 	pos++
 
 	// Length (如果有)
-	if d.curHasLen {
+	if d.curHasBodyLen {
 		pos += 2
 	}
 
@@ -296,7 +296,7 @@ func (d *Decoder) resetFrame() {
 	d.curOpcodeLen = 0
 	d.curSeqLen = 0
 	d.curCRCLen = 0
-	d.curHasLen = false
+	d.curHasBodyLen = false
 	d.curLengthVal = 0
 	d.curBodyLen = 0
 	d.curNeedBytes = 0

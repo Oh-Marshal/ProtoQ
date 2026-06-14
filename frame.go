@@ -32,7 +32,7 @@ func NewRequestFrame(opcode uint32, seq uint32, body []byte, requiresAck bool, c
 
 	f.Flags = f.Flags.SetDir(false) // 请求
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
-	f.Flags = f.Flags.SetHasLen(len(body) > 0) // 有 Body 时需要 Length
+	f.Flags = f.Flags.SetBodyLen(len(body) > 0) // 有 Body 时需要 Body 长度字段
 
 	if requiresAck {
 		if seqLen == 0 {
@@ -65,7 +65,7 @@ func NewResponseFrame(opcode uint32, seq uint32, body []byte, requestFlags Flags
 	f.Flags = f.Flags.SetRequiresAck(false) // 响应不能要求应答
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
 	f.Flags = f.Flags.SetSeqLen(seqLen)
-	f.Flags = f.Flags.SetHasLen(len(body) > 0)
+	f.Flags = f.Flags.SetBodyLen(len(body) > 0)
 
 	// 如果请求有 CRC，响应也带 CRC
 	if requestFlags.CRCLen() > 0 {
@@ -89,7 +89,7 @@ func NewNotificationFrame(opcode uint32, body []byte, crc bool) *Frame {
 	f.Flags = f.Flags.SetRequiresAck(false)
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
 	f.Flags = f.Flags.SetSeqLen(0) // 无需序列号
-	f.Flags = f.Flags.SetHasLen(len(body) > 0)
+	f.Flags = f.Flags.SetBodyLen(len(body) > 0)
 
 	if crc {
 		f.Flags = f.Flags.SetCRCLen(2)
@@ -135,7 +135,7 @@ func fieldLen(v uint32) int {
 // FrameSize 计算帧在网络上占用的总字节数（含 Magic、Flags、Padding）。
 func (f *Frame) FrameSize() int {
 	size := 1 + 1 // Magic + Flags
-	if f.Flags.HasLength() {
+	if f.Flags.HasBodyLen() {
 		size += 2 // Length
 	}
 	size += f.Flags.OpcodeLen()
@@ -151,7 +151,7 @@ func (f *Frame) FrameSize() int {
 // HeaderSize 返回帧头大小（不含 Body 和 Padding）。
 func (f *Frame) HeaderSize() int {
 	size := 1 + 1 // Magic + Flags
-	if f.Flags.HasLength() {
+	if f.Flags.HasBodyLen() {
 		size += 2
 	}
 	size += f.Flags.OpcodeLen()
