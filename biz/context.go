@@ -21,7 +21,7 @@ type Context struct {
 	// Opcode 当前请求的操作码
 	Opcode uint32
 
-	// Deadline 请求截止时间
+	// Deadline 请求截止时间（零值表示无截止时间）
 	Deadline time.Time
 
 	// Metadata 附加元数据（中间件可读写）
@@ -47,6 +47,7 @@ func NewContext(ctx context.Context, connID uint64, sessionID string, opcode uin
 }
 
 // WithTimeout 创建带超时的子上下文。
+// 返回的 cancelFunc 必须在不再需要时调用，否则会泄漏 timer 资源。
 func (c *Context) WithTimeout(timeout time.Duration) (*Context, context.CancelFunc) {
 	childCtx, cancel := context.WithTimeout(c.Ctx, timeout)
 	newCtx := *c // 浅拷贝

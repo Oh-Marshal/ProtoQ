@@ -83,7 +83,9 @@ func (c *Conn) Context() context.Context {
 	return c.ctx
 }
 
-// Raw 返回底层 net.Conn（供传输层等内部使用）。
+// Raw 返回底层 net.Conn。
+// 调用者不应直接操作此连接（Write/Read 应通过 Conn 的方法），
+// 仅供传输层适配器获取原始连接句柄。
 func (c *Conn) Raw() net.Conn {
 	return c.raw
 }

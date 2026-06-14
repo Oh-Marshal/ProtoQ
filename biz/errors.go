@@ -24,7 +24,4 @@ var (
 
 	// ErrVersionMismatch 协议版本不匹配
 	ErrVersionMismatch = errors.New("biz: protocol version mismatch")
-
-	// ErrConnClosed 连接已关闭
-	ErrConnClosed = errors.New("biz: connection closed")
 )

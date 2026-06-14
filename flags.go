@@ -130,7 +130,7 @@ func (f Flags) SetCRCLen(n int) Flags {
 //   - HAS_LEN=0 时不能有 Body（变体 B 必须无载荷）
 func (f Flags) Validate(hasBody bool) error {
 	if f.RequiresAck() && f.SeqLen() == 0 {
-		return ErrRequiresAckNeedsSeq
+		return ErrRequiresAckNoSeq
 	}
 	if f.IsResponse() && f.RequiresAck() {
 		return ErrResponseRequiresAck

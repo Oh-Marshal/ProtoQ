@@ -6,10 +6,11 @@ import (
 	"net"
 )
 
-// QUICTransport QUIC 传输层（桩实现）。
+// QUICTransport QUIC 传输层（桩实现，不可用于生产环境）。
 //
 // QUIC 协议需要第三方库（如 github.com/quic-go/quic-go），
-// 标准库不包含 QUIC 支持。此处提供接口占位，方便后续集成。
+// 标准库不包含 QUIC 支持。此处提供接口占位，Dial/Listen 始终返回错误。
+// 正式使用前请按以下步骤完成集成后才可启用。
 //
 // 集成步骤：
 //  1. 导入 quic-go: go get github.com/quic-go/quic-go

@@ -78,7 +78,8 @@ func Encode(f *Frame) ([]byte, error) {
 	return buf, nil
 }
 
-// EncodeTo 将 Frame 编码后写入 Writer。
+// EncodeTo 将 Frame 编码后写入 Writer（如 net.Conn 或 bytes.Buffer）。
+// 返回写入的字节数和可能的错误。
 func EncodeTo(f *Frame, w interface{ Write([]byte) (int, error) }) (int, error) {
 	data, err := Encode(f)
 	if err != nil {

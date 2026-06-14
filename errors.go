@@ -14,8 +14,8 @@ var (
 	// ErrInvalidMagic 帧起始 Magic 字节不正确（非 0x51）
 	ErrInvalidMagic = errors.New("protoq: invalid magic byte")
 
-	// ErrRequiresAckNeedsSeq ACK_REQ=1 但 SEQ_LEN=0（需要序列号来匹配响应）
-	ErrRequiresAckNeedsSeq = errors.New("protoq: ACK_REQ requires SEQ_LEN > 0")
+	// ErrRequiresAckNoSeq ACK_REQ=1 但 SEQ_LEN=0（需要序列号来匹配响应）
+	ErrRequiresAckNoSeq = errors.New("protoq: ACK_REQ requires SEQ_LEN > 0")
 
 	// ErrResponseRequiresAck 响应帧不能设置 ACK_REQ（响应不能要求再次应答）
 	ErrResponseRequiresAck = errors.New("protoq: response frame cannot set ACK_REQ")

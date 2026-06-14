@@ -7,18 +7,22 @@ import (
 )
 
 // PendingRequest 表示一个等待应答的请求。
+// ResponseC 由 WaitForResponse 独占消费；ErrC 接收超时/传输错误。
+// done 通道在请求被解决（响应到达或放弃）时关闭，通知 retryLoop 退出。
 type PendingRequest struct {
 	Seq       uint32
-	Frame     *Frame // 原始请求帧（用于重传）
-	ResponseC chan *Frame
-	ErrC      chan error
+	Frame     *Frame      // 原始请求帧（用于重传）
+	ResponseC chan *Frame // 响应通道，仅由 WaitForResponse 消费
+	ErrC      chan error  // 错误通道（超时、重传耗尽、连接关闭）
 	Retries   int
 	CreatedAt time.Time
-	done      chan struct{} // 关闭时表示请求已解决（响应到达或出错）
+	done      chan struct{} // 关闭时表示请求已解决，retryLoop 据此退出
 }
 
 // SeqManager 管理序列号分配和待确认请求队列。
-// 发送端使用：分配序列号 -> 入队 -> 等待响应或超时重传。
+// 发送端使用：分配序列号 → 入队 → 等待响应或超时重传。
+//
+// onRetransmit 在 retryLoop 检测到超时且未超过最大重传次数时调用（无锁回调）。
 type SeqManager struct {
 	mu      sync.Mutex
 	next    uint32

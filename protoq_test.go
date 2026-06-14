@@ -232,8 +232,8 @@ func TestFlagsValidation(t *testing.T) {
 		Body:   []byte("test"),
 	}
 	_, err := Encode(f)
-	if err != ErrRequiresAckNeedsSeq {
-		t.Errorf("expected ErrRequiresAckNeedsSeq, got %v", err)
+	if err != ErrRequiresAckNoSeq {
+		t.Errorf("expected ErrRequiresAckNoSeq, got %v", err)
 	}
 
 	// 响应帧中 ACK_REQ=1

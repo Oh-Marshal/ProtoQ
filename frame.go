@@ -17,9 +17,9 @@ type Frame struct {
 // opcode: 操作码
 // seq: 序列号（仅当需要应答时有效）
 // body: 消息体
-// needAck: 是否需要应答
+// requiresAck: 是否需要应答
 // crc: 是否附加 CRC
-func NewRequestFrame(opcode uint32, seq uint32, body []byte, needAck bool, crc bool) *Frame {
+func NewRequestFrame(opcode uint32, seq uint32, body []byte, requiresAck bool, crc bool) *Frame {
 	f := &Frame{
 		Flags:  0,
 		Opcode: opcode,
@@ -34,7 +34,7 @@ func NewRequestFrame(opcode uint32, seq uint32, body []byte, needAck bool, crc b
 	f.Flags = f.Flags.SetOpcodeLen(opLen)
 	f.Flags = f.Flags.SetHasLen(len(body) > 0) // 有 Body 时需要 Length
 
-	if needAck {
+	if requiresAck {
 		if seqLen == 0 {
 			seqLen = 2 // 需要应答时至少 2 字节 Seq
 		}
