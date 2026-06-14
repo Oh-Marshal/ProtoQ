@@ -1,23 +1,7 @@
 // Package biz — 客户端辅助函数
 //
-// biz 客户端侧不提供包装类型，只提供方便函数，让用户直接使用 protoq.Client：
-//
-//	// 1. 建立连接
-//	client, err := protoq.Dial(ctx, transport.NewTCPTransport(), ":9090")
-//
-//	// 2. 执行协商
-//	resp, err := biz.Negotiate(ctx, client, biz.WithAuth("my-token"))
-//
-//	// 3. 启动心跳
-//	stopHeartbeat := biz.StartHeartbeat(client, nil)
-//	defer stopHeartbeat()
-//
-//	// 4. 正常使用
-//	respFrame, err := client.SendRequest(ctx, 0x0100, body)
-//	client.SendNotification(0x0101, body)
-//
-//	// 5. 关闭
-//	client.Close()
+// 对标 Java uni-protocol protocol-client。
+// 提供协商、心跳等客户端辅助函数，操作 *protoq.Client。
 package biz
 
 import (
@@ -28,6 +12,8 @@ import (
 
 	protoq "github.com/oh-marshal/protoq"
 )
+
+// ─── 协商选项 ────────────────────────────────────────────────────────────────
 
 // NegotiateOption 协商选项。
 type NegotiateOption func(*NegotiateRequest)
@@ -61,9 +47,11 @@ func WithNegotiateExtra(key, value string) NegotiateOption {
 }
 
 // Negotiate 在已建立的 protoq 连接上执行内容协商。
-// 返回服务端的协商响应。
+// 对标 uni-protocol 客户端协商流程：发送协商请求 → 等待响应 → 设置 CODEC_TYPE。
+//
 // 必须在使用其他业务操作码之前调用。
 func Negotiate(ctx context.Context, client *protoq.Client, opts ...NegotiateOption) (*NegotiateResponse, error) {
+	// 1. 构建协商请求
 	req := &NegotiateRequest{
 		Version:    ProtoVersion,
 		Encryption: "none",
@@ -74,21 +62,29 @@ func Negotiate(ctx context.Context, client *protoq.Client, opts ...NegotiateOpti
 
 	reqBody, err := MarshalNegotiateRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("biz: marshal negotiate request: %w", err)
+		return nil, fmt.Errorf("biz: 序列化协商请求失败: %w", err)
 	}
 
+	// 2. 通过 Client.SendRequest 发送
 	respFrame, err := client.SendRequest(ctx, OpcodeNegotiate, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("biz: negotiate: %w", err)
+		return nil, fmt.Errorf("biz: 协商失败: %w", err)
 	}
 
+	// 3. 反序列化响应
 	resp, err := UnmarshalNegotiateResponse(respFrame.Body)
 	if err != nil {
-		return nil, fmt.Errorf("biz: unmarshal negotiate response: %w", err)
+		return nil, fmt.Errorf("biz: 反序列化协商响应失败: %w", err)
 	}
 
 	if !resp.Accepted {
 		return resp, ErrNegotiateFailed
+	}
+
+	// 4. 协商成功：设置 CODEC_TYPE 属性
+	client.SetProperty(ConnectionKeyCODEC_TYPE, req.Encryption)
+	if resp.SessionID != "" {
+		client.SetProperty("session_id", resp.SessionID)
 	}
 
 	return resp, nil
@@ -98,14 +94,12 @@ func Negotiate(ctx context.Context, client *protoq.Client, opts ...NegotiateOpti
 func MustNegotiate(ctx context.Context, client *protoq.Client, opts ...NegotiateOption) *NegotiateResponse {
 	resp, err := Negotiate(ctx, client, opts...)
 	if err != nil {
-		panic("biz: negotiate failed: " + err.Error())
+		panic("biz: 协商失败: " + err.Error())
 	}
 	return resp
 }
 
-// ──────────────────────────────────────────────
-// 心跳
-// ──────────────────────────────────────────────
+// ─── 心跳 ────────────────────────────────────────────────────────────────────
 
 // HeartbeatLoopConfig 心跳循环配置。
 type HeartbeatLoopConfig struct {
@@ -132,9 +126,11 @@ func DefaultHeartbeatLoopConfig() *HeartbeatLoopConfig {
 }
 
 // StartHeartbeat 启动心跳发送循环。
-// 返回一个 stop 函数，调用它即可停止心跳。
 //
-// 心跳丢失时，默认行为是关闭 client。可通过 cfg.OnLost 自定义。
+// 对标 uni-protocol 客户端心跳机制。
+// 使用 Client.SendRequest 发送心跳 PING，等待 PONG 响应。
+// 返回一个 stop 函数，调用它即可停止心跳。
+// 心跳丢失时，默认行为是调用 OnLost 回调。
 func StartHeartbeat(client *protoq.Client, cfg *HeartbeatLoopConfig) (stop func()) {
 	if cfg == nil {
 		cfg = DefaultHeartbeatLoopConfig()

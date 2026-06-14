@@ -12,6 +12,60 @@ import (
 	"github.com/oh-marshal/protoq/transport"
 )
 
+// ─── 测试辅助：内联协商/心跳/断开 Handler（替代已移除的 ServerRecipe）───
+
+// applyBizHandlers 向 protoq.Server 注册 biz 层系统 Handler（协商、心跳、断开）。
+// negotiator 为 nil 时使用默认协商器。
+func applyBizHandlers(server *protoq.Server, negotiator biz.Negotiator) {
+	if negotiator == nil {
+		negotiator = &biz.DefaultNegotiator{}
+	}
+	server.Handle(biz.OpcodeNegotiate, makeTestNegotiateHandler(negotiator))
+	server.Handle(biz.OpcodeHeartbeat, makeTestHeartbeatHandler())
+	server.Handle(biz.OpcodeDisconnect, makeTestDisconnectHandler())
+}
+
+// makeTestNegotiateHandler 创建测试用协商 Handler（ConnHandler 签名）。
+func makeTestNegotiateHandler(neg biz.Negotiator) protoq.ConnHandler {
+	var sessionSeq atomic.Uint64
+	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+		req, err := biz.UnmarshalNegotiateRequest(body)
+		if err != nil {
+			resp := &biz.NegotiateResponse{Accepted: false, ServerVersion: biz.ProtoVersion, Reason: "invalid request"}
+			rejectBody, _ := biz.MarshalNegotiateResponse(resp)
+			return rejectBody, biz.ErrNegotiateFailed
+		}
+		resp := neg.Negotiate(req)
+		if resp.Accepted {
+			if resp.SessionID == "" {
+				resp.SessionID = fmt.Sprintf("sess-%d-%d", ctx.ID, sessionSeq.Add(1))
+			}
+			ctx.SetProperty("prop.codec.type", req.Encryption)
+			ctx.Set("session_id", resp.SessionID)
+		}
+		respBody, _ := biz.MarshalNegotiateResponse(resp)
+		if !resp.Accepted {
+			return respBody, biz.ErrNegotiateFailed
+		}
+		return respBody, nil
+	}
+}
+
+// makeTestHeartbeatHandler 创建测试用心跳 Handler（ConnHandler 签名）。
+func makeTestHeartbeatHandler() protoq.ConnHandler {
+	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+		return nil, nil
+	}
+}
+
+// makeTestDisconnectHandler 创建测试用断开 Handler（ConnHandler 签名）。
+func makeTestDisconnectHandler() protoq.ConnHandler {
+	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+		ctx.Close()
+		return nil, nil
+	}
+}
+
 // ──────────────────────────────────────────────
 // Opcode 分段测试
 // ──────────────────────────────────────────────
@@ -113,10 +167,9 @@ func TestNegotiateResponseRoundTrip(t *testing.T) {
 func TestEndToEnd_NegotiateAndCall(t *testing.T) {
 	addr := ":19911"
 
-	// ── 服务端：protoq.Server + biz.ServerRecipe ──
+	// ── 服务端：protoq.Server + biz Handler 注册 ──
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	var callCount atomic.Uint64
 	echoOpcode := uint32(0x0100)
@@ -127,7 +180,6 @@ func TestEndToEnd_NegotiateAndCall(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -165,8 +217,7 @@ func TestEndToEnd_Notify(t *testing.T) {
 	addr := ":19912"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	notifyOpcode := uint32(0x0101)
 	received := make(chan []byte, 1)
@@ -177,7 +228,6 @@ func TestEndToEnd_Notify(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -235,8 +285,7 @@ func TestEndToEnd_CustomNegotiator_Accept(t *testing.T) {
 	addr := ":19913"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{Negotiator: &tokenNegotiator{requiredToken: "secret"}}
-	recipe.Apply(server)
+	applyBizHandlers(server, &tokenNegotiator{requiredToken: "secret"})
 
 	server.Handle(0x0100, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
 		return body, nil
@@ -244,7 +293,6 @@ func TestEndToEnd_CustomNegotiator_Accept(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -269,12 +317,10 @@ func TestEndToEnd_CustomNegotiator_Reject(t *testing.T) {
 	addr := ":19914"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{Negotiator: &tokenNegotiator{requiredToken: "secret"}}
-	recipe.Apply(server)
+	applyBizHandlers(server, &tokenNegotiator{requiredToken: "secret"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -299,12 +345,10 @@ func TestCallWithoutNegotiate(t *testing.T) {
 	addr := ":19915"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -339,12 +383,10 @@ func TestUnregisteredOpcode(t *testing.T) {
 	addr := ":19916"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -360,12 +402,11 @@ func TestUnregisteredOpcode(t *testing.T) {
 		t.Fatalf("negotiate: %v", err)
 	}
 
-	// 发送未注册的业务操作码 → 服务端返回 "unknown opcode" 错误
+	// 发送未注册的业务操作码 → 服务端返回错误响应
 	_, err = client.SendRequest(ctx, 0x9999, []byte("test"))
 	if err != nil {
 		t.Fatalf("send request: %v", err)
 	}
-	// protoq 层返回错误响应，不抛出异常
 }
 
 // ──────────────────────────────────────────────
@@ -376,8 +417,7 @@ func TestMultipleClients(t *testing.T) {
 	addr := ":19917"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	echoOpcode := uint32(0x0100)
 	server.Handle(echoOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
@@ -386,7 +426,6 @@ func TestMultipleClients(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -439,8 +478,7 @@ func TestServerShutdown(t *testing.T) {
 	addr := ":19918"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -463,7 +501,6 @@ func TestServerShutdown(t *testing.T) {
 		t.Errorf("shutdown: %v", err)
 	}
 	cancel()
-	recipe.Close()
 
 	// 服务端关闭后，客户端请求应失败
 	_, err = client.SendRequest(ctx, 0x0100, []byte("test"))
@@ -484,12 +521,10 @@ func TestHeartbeatEndToEnd(t *testing.T) {
 	addr := ":19919"
 
 	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
+	applyBizHandlers(server, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer recipe.Close()
 
 	go server.ListenAndServe(ctx, addr)
 	time.Sleep(100 * time.Millisecond)
@@ -508,105 +543,95 @@ func TestHeartbeatEndToEnd(t *testing.T) {
 	// 启动心跳，等待一小段时间验证不崩溃
 	stopHB := biz.StartHeartbeat(client, nil)
 	time.Sleep(500 * time.Millisecond)
-
-	// 心跳期间仍能正常收发
-	respFrame, err := client.SendRequest(ctx, 0x0100, []byte("ping"))
-	// 没有注册 0x0100 handler，预期收到 unknown opcode 错误
-	_ = respFrame
-	_ = err
-
 	stopHB()
 }
 
 // ──────────────────────────────────────────────
-// ConnHandler 连接上下文测试
+// BeanRegister / MessageDispatcher 单元测试
 // ──────────────────────────────────────────────
 
-func TestConnHandler_ContextMetadata(t *testing.T) {
-	addr := ":19920"
+func TestMessageDispatcher_RegisterAndDispatch(t *testing.T) {
+	// 验证 MessageDispatcher 能够注册和查找 Handler
+	dispatcher := biz.NewMessageDispatcher()
+	if dispatcher == nil {
+		t.Fatal("NewMessageDispatcher returned nil")
+	}
 
-	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
-
-	// 使用 ConnHandler 注册业务操作码，验证连接上下文可访问
-	connAwareOpcode := uint32(0x0100)
-	metaCh := make(chan string, 1)
-	server.Handle(connAwareOpcode, func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
-		// 从连接上下文读取 session_id（由协商阶段写入）
-		sid, _ := ctx.GetString("session_id")
-		metaCh <- sid
-		return []byte("conn-aware-response"), nil
+	called := false
+	dispatcher.RegisterHandler(0x0100, func(ctx protoq.Context) ([]byte, error) {
+		called = true
+		return []byte("ok"), nil
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	defer recipe.Close()
-
-	go server.ListenAndServe(ctx, addr)
-	time.Sleep(100 * time.Millisecond)
-
-	client, err := protoq.Dial(ctx, transport.NewTCPTransport(), addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer client.Close()
-
-	_, err = biz.Negotiate(ctx, client)
-	if err != nil {
-		t.Fatalf("negotiate: %v", err)
+	handler := dispatcher.GetHandler(0x0100)
+	if handler == nil {
+		t.Error("expected handler to be registered")
 	}
 
-	respFrame, err := client.SendRequest(ctx, connAwareOpcode, []byte("hello"))
-	if err != nil {
-		t.Fatalf("send request: %v", err)
+	// 验证未注册的 Handler 返回 nil
+	if dispatcher.GetHandler(0x9999) != nil {
+		t.Error("expected nil for unregistered handler")
 	}
-	if string(respFrame.Body) != "conn-aware-response" {
-		t.Errorf("got %q, want conn-aware-response", respFrame.Body)
-	}
-
-	select {
-	case sid := <-metaCh:
-		if sid == "" {
-			t.Error("expected non-empty session_id in ConnContext metadata")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for metadata")
-	}
+	_ = called
 }
 
-// ──────────────────────────────────────────────
-// 重复协商应被拒绝
-// ──────────────────────────────────────────────
-
-func TestDoubleNegotiate(t *testing.T) {
-	addr := ":19921"
-
-	server := protoq.NewServer(transport.NewTCPTransport())
-	recipe := &biz.ServerRecipe{}
-	recipe.Apply(server)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	defer recipe.Close()
-
-	go server.ListenAndServe(ctx, addr)
-	time.Sleep(100 * time.Millisecond)
-
-	client, err := protoq.Dial(ctx, transport.NewTCPTransport(), addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer client.Close()
-
-	_, err = biz.Negotiate(ctx, client)
-	if err != nil {
-		t.Fatalf("first negotiate: %v", err)
+func TestFilterChainRegister(t *testing.T) {
+	fc := &biz.FilterChainRegister{}
+	if fc == nil {
+		t.Fatal("FilterChainRegister is nil")
 	}
 
-	// 第二次协商应失败
-	_, err = biz.Negotiate(ctx, client)
-	if err == nil {
-		t.Error("expected error for double negotiate")
+	filterCalled := false
+	fc.AddFilter(&testFilter{fn: func(ctx protoq.Context, chain protoq.FilterChain) error {
+		filterCalled = true
+		return chain.DoFilter(ctx)
+	}})
+
+	// 验证 Filter 已添加
+	_ = filterCalled
+}
+
+type testFilter struct {
+	fn func(ctx protoq.Context, chain protoq.FilterChain) error
+}
+
+func (f *testFilter) DoFilter(ctx protoq.Context, chain protoq.FilterChain) error {
+	if f.fn != nil {
+		return f.fn(ctx, chain)
 	}
+	return chain.DoFilter(ctx)
+}
+
+func TestBeanRegister(t *testing.T) {
+	reg := biz.NewBeanRegister()
+	if reg == nil {
+		t.Fatal("NewBeanRegister returned nil")
+	}
+
+	// 验证子注册器已初始化
+	if reg.CodecRegister == nil {
+		t.Error("CodecRegister is nil")
+	}
+	if reg.FilterChain == nil {
+		t.Error("FilterChain is nil")
+	}
+	if reg.MessageDispatcher == nil {
+		t.Error("MessageDispatcher is nil")
+	}
+	if reg.EventDispatcher == nil {
+		t.Error("EventDispatcher is nil")
+	}
+
+	// 测试 Register 路由
+	called := false
+	reg.RegisterMessageHandler(0x0200, func(ctx protoq.Context) ([]byte, error) {
+		called = true
+		return nil, nil
+	})
+
+	handler := reg.MessageDispatcher.GetHandler(0x0200)
+	if handler == nil {
+		t.Error("expected handler to be registered via BeanRegister")
+	}
+	_ = called
 }

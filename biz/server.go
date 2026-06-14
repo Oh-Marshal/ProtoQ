@@ -1,255 +1,245 @@
-// Package biz — 服务端协议配置（Recipe 模式）
+// Package biz — 服务端实现
 //
-// ServerRecipe 是一组业务协议的编排规则。它本身不管理任何连接或
-// 生命周期，而是通过 Apply() 向 protoq.Server 注册：
-//   - 系统操作码的 ConnHandler（协商、心跳、断开）
-//   - 连接生命周期钩子（OnConnect、OnClose）
-//   - 心跳超时监控 goroutine
+// 对标 Java uni-protocol org.facelang.unified.proto.netty.server.NettyMessageServer。
+// MessageServer 聚合 BeanRegister，通过 Register() 注册 Codec/Filter/Handler，
+// 为每个连接创建 ConnectionBridge 并启动读写循环。
 //
 // 使用方式：
 //
-//	server := protoq.NewServer(transport.NewTCPTransport())
-//	recipe := &biz.ServerRecipe{}  // 零值可用
-//	recipe.Apply(server)
+//	srv := biz.NewMessageServer()
+//	srv.RegisterMessageHandler(biz.OpcodeNegotiate, negotiateHandler.Handle)
+//	srv.RegisterMessageHandler(biz.OpcodeHeartbeat, heartbeatHandler.Handle)
+//	// 注册业务 Handler
+//	srv.RegisterMessageHandler(0x0100, myBusinessHandler)
+//	srv.Register(&myCustomFilter{}) // Filter 自动路由
 //
-//	server.Handle(0x0100, handler) // 业务操作码仍直接注册
-//	server.ListenAndServe(ctx, ":9090")
+//	// 启动监听
+//	listener, _ := net.Listen("tcp", ":9090")
+//	for {
+//	    rawConn, _ := listener.Accept()
+//	    go srv.Serve(rawConn)
+//	}
+//
+// 对标 uni-protocol 还原要点：
+//   - BeanRegister 聚合：CodecRegister + FilterChainRegister + MessageDispatcher + EventDispatcher
+//   - Serve(conn)：创建 ConnectionBridge → 启动读写循环
+//   - 内置注册 NegotiateFilter + NegotiatePayloadHandler + HeartbeatPayloadHandler
 package biz
 
 import (
-	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	protoq "github.com/oh-marshal/protoq"
+	"github.com/oh-marshal/protoq"
 )
 
-// ServerRecipe 服务端业务协议配置。
-// 零值可用（默认协商器 + 默认心跳）。
-type ServerRecipe struct {
-	// Negotiator 协商策略，nil 时使用 DefaultNegotiator
-	Negotiator Negotiator
+// MessageServer 协议消息服务器。
+//
+// 对标 uni-protocol NettyMessageServer（implements MessageServer）。
+// 聚合 BeanRegister，管理 Codec/Filter/Handler 的注册，
+// 为每个接受的连接创建 ConnectionBridge。
+//
+// 与旧 ServerRecipe 模式的区别：
+//   - ServerRecipe 通过 Apply() 注入 protoq.Server（依赖外部 Server 实例）
+//   - MessageServer 自包含：持有 BeanRegister，直接管理连接
+type MessageServer struct {
+	// beanRegister Bean 注册中心（聚合 CodecRegister + FilterChain + MessageDispatcher + EventDispatcher）
+	beanRegister *BeanRegister
 
-	// Heartbeat 心跳配置，nil 时使用默认值（30s 间隔，3 次丢失判定断开）
-	Heartbeat *HeartbeatConfig
+	// negotiator 协商策略（可插拔）
+	negotiator Negotiator
 
-	// 内部状态
-	connCtxs   map[uint64]*protoq.ConnContext // connID → ConnContext
-	connStates map[uint64]*connState          // connID → state
-	statesMu   sync.Mutex
+	// negotiateHandler 协商消息处理器（由 NewMessageServer 自动创建并注册）
+	negotiateHandler *NegotiatePayloadHandler
 
-	sessionSeq atomic.Uint64
+	// heartbeatHandler 心跳消息处理器（由 NewMessageServer 自动创建并注册）
+	heartbeatHandler *HeartbeatPayloadHandler
 
-	// 心跳监控的停止信号
-	hbStop chan struct{}
+	// 连接管理
+	conns   map[*ConnectionBridge]struct{}
+	connsMu sync.Mutex
+
+	// 状态
+	running atomic.Bool
+
+	// 连接 ID 自增
+	connIDSeq atomic.Uint64
 }
 
-// HeartbeatConfig 心跳配置。
-type HeartbeatConfig struct {
-	// Interval 心跳间隔，默认 30s
-	Interval time.Duration
+// MessageServerOption 服务器配置选项。
+type MessageServerOption func(*MessageServer)
 
-	// Timeout 服务端心跳超时时间（超过此时间未收到心跳则关闭连接），默认 90s
-	Timeout time.Duration
-
-	// MaxMissed 最大连续丢失次数（用于替代固定超时），默认 3
-	MaxMissed int
+// WithNegotiator 设置协商策略。
+func WithNegotiator(neg Negotiator) MessageServerOption {
+	return func(s *MessageServer) { s.negotiator = neg }
 }
 
-// connState 单连接的业务状态。
-type connState struct {
-	negotiated bool
-	sessionID  string
-	lastPing   time.Time
-}
-
-// ──────────────────────────────────────────────
-// Apply
-// ──────────────────────────────────────────────
-
-// Apply 将本 Recipe 的配置注入到 protoq.Server。
-// 必须在 server.ListenAndServe() 之前调用。
-func (r *ServerRecipe) Apply(server *protoq.Server) {
-	r.connCtxs = make(map[uint64]*protoq.ConnContext)
-	r.connStates = make(map[uint64]*connState)
-
-	// 协商器默认值
-	neg := r.Negotiator
-	if neg == nil {
-		neg = &DefaultNegotiator{}
+// NewMessageServer 创建协议消息服务器。
+//
+// 对标 uni-protocol NettyMessageServer 构造器。
+// 自动创建 BeanRegister 并注册内置 Filter 和 Handler：
+//   - NegotiateFilter：协商检查过滤器
+//   - NegotiatePayloadHandler：协商消息处理（messageId=0x01）
+//   - HeartbeatPayloadHandler：心跳消息处理（messageId=0x02）
+//
+// 可通过 Register() 追加 Codec/Filter，通过 RegisterMessageHandler() 注册业务 Handler。
+func NewMessageServer(opts ...MessageServerOption) *MessageServer {
+	srv := &MessageServer{
+		beanRegister: NewBeanRegister(),
+		negotiator:   &DefaultNegotiator{},
+		conns:        make(map[*ConnectionBridge]struct{}),
 	}
 
-	// 心跳配置默认值
-	hbCfg := r.Heartbeat
-	if hbCfg == nil {
-		hbCfg = DefaultHeartbeatConfig()
+	for _, opt := range opts {
+		opt(srv)
 	}
 
-	// 注册系统操作码
-	server.Handle(OpcodeNegotiate, r.makeNegotiateHandler(neg))
-	server.Handle(OpcodeHeartbeat, r.makeHeartbeatHandler(hbCfg))
-	server.Handle(OpcodeDisconnect, r.makeDisconnectHandler())
+	// ── 注册内置 Filter（对标 uni-protocol MessageDispatcher 构造时的自动注册）──
+	srv.beanRegister.Register(&NegotiateFilter{})
 
-	// 注册连接钩子
-	server.OnConnect = r.onConnect
-	server.OnClose = r.onClose
+	// ── 注册内置 Handler（对标 uni-protocol MessageDispatcher 构造时的自动注册）──
+	srv.negotiateHandler = NewNegotiatePayloadHandler(srv.negotiator)
+	srv.heartbeatHandler = NewHeartbeatPayloadHandler()
 
-	// 启动心跳超时监控
-	r.hbStop = make(chan struct{})
-	go r.heartbeatWatcher(hbCfg)
+	srv.beanRegister.RegisterMessageHandler(OpcodeNegotiate, srv.negotiateHandler.Handle)
+	srv.beanRegister.RegisterMessageHandler(OpcodeHeartbeat, srv.heartbeatHandler.Handle)
+
+	return srv
 }
 
-// Close 停止心跳监控 goroutine。
-// 通常在 server.Shutdown() 之后调用。
-func (r *ServerRecipe) Close() {
-	if r.hbStop != nil {
-		close(r.hbStop)
+// Register 按类型自动分发注册 Bean。
+//
+// 对标 uni-protocol BeanRegister.register(bean)。
+//
+// 支持的类型：
+//   - protoq.Codec: 注册到 CodecRegister
+//   - protoq.Filter: 注册到 FilterChain
+//   - 其他类型: 忽略（需调用 RegisterMessageHandler / RegisterEventHandler）
+func (s *MessageServer) Register(bean interface{}) {
+	s.beanRegister.Register(bean)
+}
+
+// RegisterMessageHandler 按 messageID 注册消息处理器。
+//
+// 对标 uni-protocol BeanRegister.registerMessageHandler(messageId, handler)。
+// 便捷方法，等价于 s.beanRegister.MessageDispatcher.RegisterHandler(messageID, handler)。
+//
+// messageID 使用 Opcode 的低字节（对标 uni-protocol 的 1 字节 messageId）。
+// 示例：s.RegisterMessageHandler(0x0100, myHandler)
+func (s *MessageServer) RegisterMessageHandler(messageID uint32, handler protoq.MessageHandler) {
+	s.beanRegister.RegisterMessageHandler(messageID, handler)
+}
+
+// RegisterEventHandler 按事件名注册事件处理器。
+//
+// 对标 uni-protocol BeanRegister.registerEventHandler(event, handler)。
+func (s *MessageServer) RegisterEventHandler(event string, handler protoq.EventHandler) {
+	s.beanRegister.RegisterEventHandler(event, handler)
+}
+
+// BeanRegister 返回内部的 BeanRegister（用于直接访问子注册器）。
+func (s *MessageServer) BeanRegister() *BeanRegister {
+	return s.beanRegister
+}
+
+// Serve 为单个连接创建 ConnectionBridge 并启动读写循环。
+//
+// 对标 uni-protocol NettyMessageServer.channelActive 后的 bridge 挂载。
+// 阻塞直到连接关闭。
+//
+// 流程：
+//  1. 包装 rawConn 为 protoq.Conn（分配连接 ID）
+//  2. 创建 ConnectionBridge（绑定 BeanRegister）
+//  3. 注册连接到 BeanRegister
+//  4. 启动 bridge.Serve()（读循环 + 写循环）
+//  5. 连接关闭后清理
+func (s *MessageServer) Serve(rawConn net.Conn) {
+	connID := s.connIDSeq.Add(1)
+	conn := protoq.NewConnWithID(nil, rawConn, connID, "tcp")
+
+	bridge := NewConnectionBridge(conn, s.beanRegister)
+
+	// 注册连接
+	s.connsMu.Lock()
+	s.conns[bridge] = struct{}{}
+	s.connsMu.Unlock()
+
+	// 注册到 BeanRegister 的连接表
+	clientID := formatClientID(connID)
+	s.beanRegister.AddConnection(clientID, conn)
+
+	// 启动桥接器（阻塞直到连接关闭）
+	bridge.Serve()
+
+	// 清理
+	s.beanRegister.RemoveConnection(clientID)
+	s.connsMu.Lock()
+	delete(s.conns, bridge)
+	s.connsMu.Unlock()
+}
+
+// ServeConn 为已有的 protoq 连接创建 ConnectionBridge。
+//
+// 用于已建立的 protoq.Conn（如通过自定义传输层创建的连接）。
+// 不会分配新的连接 ID，使用 Conn 已有的 ID。
+func (s *MessageServer) ServeConn(conn *protoq.Conn) {
+	bridge := NewConnectionBridge(conn, s.beanRegister)
+
+	clientID := formatClientID(conn.ConnectionID())
+	s.beanRegister.AddConnection(clientID, conn)
+
+	s.connsMu.Lock()
+	s.conns[bridge] = struct{}{}
+	s.connsMu.Unlock()
+
+	bridge.Serve()
+
+	s.beanRegister.RemoveConnection(clientID)
+	s.connsMu.Lock()
+	delete(s.conns, bridge)
+	s.connsMu.Unlock()
+}
+
+// ConnectionCount 返回当前活跃连接数。
+//
+// 对标 uni-protocol MessageServer.getConnectionCount()。
+func (s *MessageServer) ConnectionCount() int {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	return len(s.conns)
+}
+
+// IsRunning 返回服务器是否正在运行。
+//
+// 对标 uni-protocol MessageServer.isRunning()。
+func (s *MessageServer) IsRunning() bool {
+	return s.running.Load()
+}
+
+// SetRunning 设置运行状态。
+func (s *MessageServer) SetRunning(running bool) {
+	s.running.Store(running)
+}
+
+// ─── 辅助函数 ────────────────────────────────────────────────────────────────
+
+// formatClientID 格式化连接 ID 为 clientID 字符串。
+func formatClientID(connID uint64) string {
+	return "conn-" + formatUint64(connID)
+}
+
+// formatUint64 快速格式化 uint64 为字符串（避免 fmt.Sprintf 开销）。
+func formatUint64(v uint64) string {
+	if v == 0 {
+		return "0"
 	}
-}
-
-// ──────────────────────────────────────────────
-// 连接钩子
-// ──────────────────────────────────────────────
-
-func (r *ServerRecipe) onConnect(ctx *protoq.ConnContext) {
-	r.statesMu.Lock()
-	r.connCtxs[ctx.ID] = ctx
-	r.connStates[ctx.ID] = &connState{lastPing: time.Now()}
-	r.statesMu.Unlock()
-}
-
-func (r *ServerRecipe) onClose(ctx *protoq.ConnContext) {
-	r.statesMu.Lock()
-	delete(r.connCtxs, ctx.ID)
-	delete(r.connStates, ctx.ID)
-	r.statesMu.Unlock()
-}
-
-// ──────────────────────────────────────────────
-// ConnHandler 工厂
-// ──────────────────────────────────────────────
-
-func (r *ServerRecipe) makeNegotiateHandler(neg Negotiator) protoq.ConnHandler {
-	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
-		r.statesMu.Lock()
-		cs, exists := r.connStates[ctx.ID]
-		if !exists {
-			cs = &connState{}
-			r.connStates[ctx.ID] = cs
-			r.connCtxs[ctx.ID] = ctx
-		}
-		if cs.negotiated {
-			r.statesMu.Unlock()
-			return nil, fmt.Errorf("biz: already negotiated")
-		}
-		r.statesMu.Unlock()
-
-		req, err := UnmarshalNegotiateRequest(body)
-		if err != nil {
-			return r.marshalReject(ctx.ID, 0, "invalid negotiate: "+err.Error()), ErrNegotiateFailed
-		}
-
-		resp := neg.Negotiate(req)
-		if resp.Accepted && resp.SessionID == "" {
-			resp.SessionID = fmt.Sprintf("sess-%d-%d", ctx.ID, r.sessionSeq.Add(1))
-		}
-		respBody, _ := MarshalNegotiateResponse(resp)
-
-		r.statesMu.Lock()
-		cs = r.connStates[ctx.ID]
-		if cs == nil {
-			cs = &connState{}
-			r.connStates[ctx.ID] = cs
-		}
-		if resp.Accepted {
-			cs.negotiated = true
-			cs.sessionID = resp.SessionID
-			cs.lastPing = time.Now()
-		}
-		r.statesMu.Unlock()
-
-		ctx.Set("session_id", resp.SessionID)
-
-		if !resp.Accepted {
-			return respBody, ErrNegotiateFailed
-		}
-		return respBody, nil
+	buf := make([]byte, 20)
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
 	}
-}
-
-func (r *ServerRecipe) makeHeartbeatHandler(cfg *HeartbeatConfig) protoq.ConnHandler {
-	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
-		r.statesMu.Lock()
-		cs, ok := r.connStates[ctx.ID]
-		if ok {
-			cs.lastPing = time.Now()
-		}
-		r.statesMu.Unlock()
-
-		if !ok {
-			return nil, nil // 未协商的连接忽略心跳
-		}
-		// 心跳响应无 Body
-		return nil, nil
-	}
-}
-
-func (r *ServerRecipe) makeDisconnectHandler() protoq.ConnHandler {
-	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
-		ctx.Close()
-		return nil, nil
-	}
-}
-
-// marshalReject 构造拒绝响应体。
-func (r *ServerRecipe) marshalReject(connID uint64, seq uint32, reason string) []byte {
-	resp := &NegotiateResponse{
-		Accepted:      false,
-		ServerVersion: ProtoVersion,
-		Reason:        reason,
-	}
-	body, _ := MarshalNegotiateResponse(resp)
-	return body
-}
-
-// ──────────────────────────────────────────────
-// 心跳监控
-// ──────────────────────────────────────────────
-
-func (r *ServerRecipe) heartbeatWatcher(cfg *HeartbeatConfig) {
-	ticker := time.NewTicker(cfg.Interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.statesMu.Lock()
-			now := time.Now()
-			var expired []*protoq.ConnContext
-			for id, cs := range r.connStates {
-				if cs.negotiated && now.Sub(cs.lastPing) > cfg.Timeout {
-					if ctx, ok := r.connCtxs[id]; ok {
-						expired = append(expired, ctx)
-					}
-				}
-			}
-			r.statesMu.Unlock()
-
-			for _, ctx := range expired {
-				ctx.Close()
-			}
-		case <-r.hbStop:
-			return
-		}
-	}
-}
-
-// DefaultHeartbeatConfig 返回默认心跳配置。
-func DefaultHeartbeatConfig() *HeartbeatConfig {
-	return &HeartbeatConfig{
-		Interval:  HeartbeatInterval,
-		Timeout:   HeartbeatServerTimeout,
-		MaxMissed: HeartbeatMaxMissed,
-	}
+	return string(buf[i:])
 }

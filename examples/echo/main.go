@@ -67,7 +67,39 @@ func main() {
 	}
 }
 
-// ─── 自定义协商器 ─────────────────────────────────────────────────────────
+// ─── 服务端协商/心跳 Handler（内联实现，替代 ServerRecipe）────────────────
+
+// makeServerNegotiateHandler 创建协商处理器（ConnHandler 签名）。
+func makeServerNegotiateHandler(neg biz.Negotiator) protoq.ConnHandler {
+	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+		req, err := biz.UnmarshalNegotiateRequest(body)
+		if err != nil {
+			resp := &biz.NegotiateResponse{Accepted: false, ServerVersion: biz.ProtoVersion, Reason: "invalid request"}
+			rejectBody, _ := biz.MarshalNegotiateResponse(resp)
+			return rejectBody, biz.ErrNegotiateFailed
+		}
+		resp := neg.Negotiate(req)
+		if resp.Accepted {
+			ctx.SetProperty("prop.codec.type", req.Encryption)
+			if resp.SessionID == "" {
+				resp.SessionID = fmt.Sprintf("sess-%d", ctx.ID)
+			}
+			ctx.Set("session_id", resp.SessionID)
+		}
+		respBody, _ := biz.MarshalNegotiateResponse(resp)
+		if !resp.Accepted {
+			return respBody, biz.ErrNegotiateFailed
+		}
+		return respBody, nil
+	}
+}
+
+// makeServerHeartbeatHandler 创建心跳处理器（ConnHandler 签名）。
+func makeServerHeartbeatHandler() protoq.ConnHandler {
+	return func(ctx *protoq.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+		return nil, nil // PONG 无 Body
+	}
+}
 
 // tokenNegotiator 基于 token 的认证协商器。
 type tokenNegotiator struct {
@@ -128,14 +160,12 @@ func runServer() {
 	// 2. 创建 protoq 服务端
 	server := protoq.NewServer(factory, protoq.WithServerOpcodeLen(2))
 
-	// 3. 创建 biz 配置：自定义协商器 + 心跳监控
+	// 3. 创建 biz 配置：自定义协商器
 	negotiator := &tokenNegotiator{requiredToken: *token}
-	recipe := &biz.ServerRecipe{
-		Negotiator: negotiator,
-		// 使用默认心跳配置（间隔 30s，超时 90s）
-	}
-	recipe.Apply(server)
-	defer recipe.Close()
+
+	// 注册系统操作码（协商、心跳）通过 server.Handle 直接注册
+	server.Handle(biz.OpcodeNegotiate, makeServerNegotiateHandler(negotiator))
+	server.Handle(biz.OpcodeHeartbeat, makeServerHeartbeatHandler())
 
 	// 4. 注册业务操作码（ConnHandler 可获取连接上下文 + 会话元数据）
 	// Echo: 回显请求体

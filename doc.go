@@ -27,7 +27,8 @@
 // 通过实现根包定义的 Transport / Dialer / ListenerFactory 接口接入。
 //
 // 子包 biz/ 提供业务协议层配置（Opcode 分区、协商、心跳），
-// 通过 ServerRecipe.Apply() 向 protoq.Server 注入配置，通过独立函数辅助客户端操作。
+// 通过 MessageServer（注册中心模式）+ ConnectionBridge（连接桥接）提供服务端能力，
+// 通过 Negotiate() / StartHeartbeat() 提供客户端辅助函数。
 //
 // # 快速开始
 //
