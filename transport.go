@@ -14,18 +14,18 @@ type Transport interface {
 	// Listen 在指定地址上监听并返回 Listener。
 	Listen(ctx context.Context, addr string) (net.Listener, error)
 
-	// String 返回传输协议名称（如 "tcp", "ws", "quic"）。
-	String() string
+	// Protocol 返回传输协议名称（如 "tcp", "ws", "quic"）。
+	Protocol() string
 }
 
 // Dialer 是仅用于客户端的传输接口。
 type Dialer interface {
 	Dial(ctx context.Context, addr string) (net.Conn, error)
-	String() string
+	Protocol() string
 }
 
 // ListenerFactory 是仅用于服务端的传输接口。
 type ListenerFactory interface {
 	Listen(ctx context.Context, addr string) (net.Listener, error)
-	String() string
+	Protocol() string
 }

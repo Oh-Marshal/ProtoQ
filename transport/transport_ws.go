@@ -381,7 +381,7 @@ func (t *WSTransport) Listen(ctx context.Context, addr string) (net.Listener, er
 	return &wsListener{listener: rawListener}, nil
 }
 
-// String 返回传输协议名称。
-func (t *WSTransport) String() string {
+// Protocol 返回传输协议名称。
+func (t *WSTransport) Protocol() string {
 	return "ws"
 }

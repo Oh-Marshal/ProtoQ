@@ -193,7 +193,7 @@ type ClientStats struct {
 func Dial(ctx context.Context, transport Dialer, addr string, opts ...ClientOption) (*Client, error) {
 	conn, err := transport.Dial(ctx, addr)
 	if err != nil {
-		return nil, fmt.Errorf("protoq dial %s: %w", transport.String(), err)
+		return nil, fmt.Errorf("protoq dial %s: %w", transport.Protocol(), err)
 	}
 	return NewClient(conn, opts...), nil
 }

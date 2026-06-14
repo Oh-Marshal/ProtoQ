@@ -25,7 +25,7 @@ func (t *TCPTransport) Listen(ctx context.Context, addr string) (net.Listener, e
 	return lc.Listen(ctx, "tcp", addr)
 }
 
-// String 返回传输协议名称。
-func (t *TCPTransport) String() string {
+// Protocol 返回传输协议名称。
+func (t *TCPTransport) Protocol() string {
 	return "tcp"
 }

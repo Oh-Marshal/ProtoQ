@@ -38,7 +38,7 @@ func (t *QUICTransport) Listen(ctx context.Context, addr string) (net.Listener, 
 	return nil, errors.New("protoq: QUIC transport requires github.com/quic-go/quic-go (not implemented in stdlib)")
 }
 
-// String 返回传输协议名称。
-func (t *QUICTransport) String() string {
+// Protocol 返回传输协议名称。
+func (t *QUICTransport) Protocol() string {
 	return "quic"
 }
