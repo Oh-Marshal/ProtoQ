@@ -7,8 +7,8 @@
 // 使用方式：
 //
 //	srv := biz.NewMessageServer()
-//	srv.RegisterMessageHandler(biz.OpcodeNegotiate, negotiateHandler.Handle)
-//	srv.RegisterMessageHandler(biz.OpcodeHeartbeat, heartbeatHandler.Handle)
+//	srv.RegisterMessageHandler(biz.constant.OpcodeNegotiate, negotiateHandler.Handle)
+//	srv.RegisterMessageHandler(biz.constant.OpcodeHeartbeat, heartbeatHandler.Handle)
 //	// 注册业务 Handler
 //	srv.RegisterMessageHandler(0x0100, myBusinessHandler)
 //	srv.Register(&myCustomFilter{}) // Filter 自动路由
@@ -23,7 +23,7 @@
 // 对标 uni-protocol 还原要点：
 //   - BeanRegister 聚合：CodecRegister + FilterChainRegister + MessageDispatcher + EventDispatcher
 //   - Serve(conn)：创建 ConnectionBridge → 启动读写循环
-//   - 内置注册 NegotiateFilter + NegotiatePayloadHandler + HeartbeatPayloadHandler
+//   - 内置注册 filter.NegotiateFilter + NegotiatePayloadHandler + HeartbeatPayloadHandler
 package server
 
 import (
@@ -34,9 +34,9 @@ import (
 	api "github.com/oh-marshal/protoq"
 	constant "github.com/oh-marshal/protoq/basic/constant"
 	filter "github.com/oh-marshal/protoq/basic/filter"
+	message "github.com/oh-marshal/protoq/basic/message"
 	msghandler "github.com/oh-marshal/protoq/basic/message/handler"
 	register "github.com/oh-marshal/protoq/basic/register"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 	netty "github.com/oh-marshal/protoq/netty"
 )
 
@@ -51,19 +51,19 @@ import (
 //   - MessageServer 自包含：持有 BeanRegister，直接管理连接
 type MessageServer struct {
 	// beanRegister Bean 注册中心（聚合 CodecRegister + FilterChain + MessageDispatcher + EventDispatcher）
-	beanRegister *BeanRegister
+	beanRegister *register.BeanRegister
 
 	// negotiator 协商策略（可插拔）
-	negotiator Negotiator
+	negotiator message.Negotiator
 
 	// negotiateHandler 协商消息处理器（由 NewMessageServer 自动创建并注册）
-	negotiateHandler *NegotiatePayloadHandler
+	negotiateHandler *msghandler.NegotiatePayloadHandler
 
 	// heartbeatHandler 心跳消息处理器（由 NewMessageServer 自动创建并注册）
-	heartbeatHandler *HeartbeatPayloadHandler
+	heartbeatHandler *msghandler.HeartbeatPayloadHandler
 
 	// 连接管理
-	conns   map[*ConnectionBridge]struct{}
+	conns   map[*netty.ConnectionBridge]struct{}
 	connsMu sync.Mutex
 
 	// 状态
@@ -77,7 +77,7 @@ type MessageServer struct {
 type MessageServerOption func(*MessageServer)
 
 // WithNegotiator 设置协商策略。
-func WithNegotiator(neg Negotiator) MessageServerOption {
+func WithNegotiator(neg message.Negotiator) MessageServerOption {
 	return func(s *MessageServer) { s.negotiator = neg }
 }
 
@@ -85,16 +85,16 @@ func WithNegotiator(neg Negotiator) MessageServerOption {
 //
 // 对标 uni-protocol NettyMessageServer 构造器。
 // 自动创建 BeanRegister 并注册内置 Filter 和 Handler：
-//   - NegotiateFilter：协商检查过滤器
+//   - filter.NegotiateFilter：协商检查过滤器
 //   - NegotiatePayloadHandler：协商消息处理（messageId=0x01）
 //   - HeartbeatPayloadHandler：心跳消息处理（messageId=0x02）
 //
 // 可通过 Register() 追加 Codec/Filter，通过 RegisterMessageHandler() 注册业务 Handler。
 func NewMessageServer(opts ...MessageServerOption) *MessageServer {
 	srv := &MessageServer{
-		beanRegister: NewBeanRegister(),
-		negotiator:   &DefaultNegotiator{},
-		conns:        make(map[*ConnectionBridge]struct{}),
+		beanRegister: register.NewBeanRegister(),
+		negotiator:   &message.DefaultNegotiator{},
+		conns:        make(map[*netty.ConnectionBridge]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -102,14 +102,14 @@ func NewMessageServer(opts ...MessageServerOption) *MessageServer {
 	}
 
 	// ── 注册内置 Filter（对标 uni-protocol MessageDispatcher 构造时的自动注册）──
-	srv.beanRegister.Register(&NegotiateFilter{})
+	srv.beanRegister.Register(&filter.NegotiateFilter{})
 
 	// ── 注册内置 Handler（对标 uni-protocol MessageDispatcher 构造时的自动注册）──
-	srv.negotiateHandler = NewNegotiatePayloadHandler(srv.negotiator)
-	srv.heartbeatHandler = NewHeartbeatPayloadHandler()
+	srv.negotiateHandler = msghandler.NewNegotiatePayloadHandler(srv.negotiator)
+	srv.heartbeatHandler = msghandler.NewHeartbeatPayloadHandler()
 
-	srv.beanRegister.RegisterMessageHandler(OpcodeNegotiate, srv.negotiateHandler.Handle)
-	srv.beanRegister.RegisterMessageHandler(OpcodeHeartbeat, srv.heartbeatHandler.Handle)
+	srv.beanRegister.RegisterMessageHandler(constant.OpcodeNegotiate, srv.negotiateHandler.Handle)
+	srv.beanRegister.RegisterMessageHandler(constant.OpcodeHeartbeat, srv.heartbeatHandler.Handle)
 
 	return srv
 }
@@ -145,7 +145,7 @@ func (s *MessageServer) RegisterEventHandler(event string, handler api.EventHand
 }
 
 // BeanRegister 返回内部的 BeanRegister（用于直接访问子注册器）。
-func (s *MessageServer) BeanRegister() *BeanRegister {
+func (s *MessageServer) BeanRegister() *register.BeanRegister {
 	return s.beanRegister
 }
 
@@ -162,9 +162,9 @@ func (s *MessageServer) BeanRegister() *BeanRegister {
 //  5. 连接关闭后清理
 func (s *MessageServer) Serve(rawConn net.Conn) {
 	connID := s.connIDSeq.Add(1)
-	conn := api.NewConnWithID(nil, rawConn, connID, "tcp")
+	conn := netty.NewConnWithID(nil, rawConn, connID, "tcp")
 
-	bridge := NewConnectionBridge(conn, s.beanRegister)
+	bridge := netty.NewConnectionBridge(conn, s.beanRegister)
 
 	// 注册连接
 	s.connsMu.Lock()
@@ -189,8 +189,8 @@ func (s *MessageServer) Serve(rawConn net.Conn) {
 //
 // 用于已建立的 Conn（如通过自定义传输层创建的连接）。
 // 不会分配新的连接 ID，使用 Conn 已有的 ID。
-func (s *MessageServer) ServeConn(conn *api.Conn) {
-	bridge := NewConnectionBridge(conn, s.beanRegister)
+func (s *MessageServer) ServeConn(conn *netty.Conn) {
+	bridge := netty.NewConnectionBridge(conn, s.beanRegister)
 
 	clientID := formatClientID(conn.ConnectionID())
 	s.beanRegister.AddConnection(clientID, conn)

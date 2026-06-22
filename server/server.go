@@ -1,6 +1,7 @@
 package server
 
 import (
+	api "github.com/oh-marshal/protoq"
 	"context"
 	"fmt"
 	"io"
@@ -16,7 +17,7 @@ import (
 // 嵌入 Conn 获得完整的连接生命周期管理（读写、关闭、context 取消）。
 type ConnContext struct {
 	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
-	*Conn
+	*netty.Conn
 
 	// ID 连接唯一标识（服务端内单调递增）
 	ID uint64
@@ -43,7 +44,7 @@ type Server struct {
 	mu       sync.RWMutex
 
 	// 传输层工厂
-	listenerFactory ListenerFactory
+	listenerFactory api.ListenerFactory
 
 	// 配置
 	opcodeLen int
@@ -85,12 +86,12 @@ func WithOnClose(fn func(ctx *ConnContext)) ServerOption {
 }
 
 // NewServer 创建一个 ProtoQ 服务端。
-func NewServer(factory ListenerFactory, opts ...ServerOption) *Server {
+func NewServer(factory api.ListenerFactory, opts ...ServerOption) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		handlers:        make(map[uint32]ConnHandler),
 		listenerFactory: factory,
-		opcodeLen:       DefaultOpcodeLen,
+		opcodeLen:       api.DefaultOpcodeLen,
 		conns:           make(map[*ConnContext]struct{}),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -169,7 +170,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // 连接的 context 派生于服务端的 context，服务端关闭时所有连接自动取消。
 func (s *Server) newConnContext(rawConn net.Conn, id uint64) *ConnContext {
 	return &ConnContext{
-		Conn:     NewConn(s.ctx, rawConn),
+		Conn:     netty.NewConn(s.ctx, rawConn),
 		ID:       id,
 		metadata: make(map[string]interface{}),
 		server:   s,
@@ -241,7 +242,7 @@ func (s *Server) lookupHandler(opcode uint32) (ConnHandler, bool) {
 }
 
 // handleRequest 使用 ConnHandler 处理需要应答的请求。
-func (ctx *ConnContext) handleRequest(frame *PacketData, handler ConnHandler) {
+func (ctx *ConnContext) handleRequest(frame *api.PacketData, handler ConnHandler) {
 	respBody, err := handler(ctx, frame.Opcode, frame.Body)
 	if err != nil {
 		// 若有响应体则发送它（如协商拒绝的 JSON），否则发送错误消息
@@ -249,21 +250,21 @@ func (ctx *ConnContext) handleRequest(frame *PacketData, handler ConnHandler) {
 		if len(body) == 0 {
 			body = []byte(err.Error())
 		}
-		resp := NewResponsePacket(frame.Opcode, frame.Seq, body, frame.Flags)
+		resp := api.NewResponsePacket(frame.Opcode, frame.Seq, body, frame.Flags)
 		resp.Flags = resp.Flags.SetOpcodeLen(ctx.server.opcodeLen)
 		ctx.WritePacket(resp)
 		return
 	}
 
-	resp := NewResponsePacket(frame.Opcode, frame.Seq, respBody, frame.Flags)
+	resp := api.NewResponsePacket(frame.Opcode, frame.Seq, respBody, frame.Flags)
 	resp.Flags = resp.Flags.SetOpcodeLen(ctx.server.opcodeLen)
 	ctx.WritePacket(resp)
 }
 
 // sendErrorResponse 发送错误响应。
-func (ctx *ConnContext) sendErrorResponse(reqFrame *PacketData, err error) {
+func (ctx *ConnContext) sendErrorResponse(reqFrame *api.PacketData, err error) {
 	errMsg := []byte(err.Error())
-	resp := NewResponsePacket(reqFrame.Opcode, reqFrame.Seq, errMsg, reqFrame.Flags)
+	resp := api.NewResponsePacket(reqFrame.Opcode, reqFrame.Seq, errMsg, reqFrame.Flags)
 	resp.Flags = resp.Flags.SetOpcodeLen(ctx.server.opcodeLen)
 	ctx.WritePacket(resp)
 }

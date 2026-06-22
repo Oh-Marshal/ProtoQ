@@ -12,9 +12,7 @@ import (
 	"fmt"
 
 	api "github.com/oh-marshal/protoq"
-	constant "github.com/oh-marshal/protoq/basic/constant"
 	exception "github.com/oh-marshal/protoq/basic/exception"
-	msghandler "github.com/oh-marshal/protoq/basic/message/handler"
 )
 
 // ConnectionKeyCODEC_TYPE 连接属性键：编解码/加密类型。
@@ -63,7 +61,7 @@ func (f *NegotiateFilter) DoFilter(ctx api.Context, chain api.FilterChain) error
 	if conn != nil {
 		codecType, hasCodec := conn.GetProperty(ConnectionKeyCODEC_TYPE)
 		if !hasCodec || codecType == nil {
-			return fmt.Errorf("%w: messageId=0x%02X 在协商完成前到达", ErrNegotiateRequired, messageID)
+			return fmt.Errorf("%w: messageId=0x%02X 在协商完成前到达", exception.ErrNegotiateRequired, messageID)
 		}
 	}
 

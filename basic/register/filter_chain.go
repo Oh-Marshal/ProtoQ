@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	api "github.com/oh-marshal/protoq"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 )
 
 // FilterChainRegister 过滤器链注册表与执行器。

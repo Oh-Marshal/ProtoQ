@@ -1,6 +1,7 @@
 package client
 
 import (
+	api "github.com/oh-marshal/protoq"
 	"context"
 	"fmt"
 	"io"
@@ -14,9 +15,9 @@ import (
 // 支持通过 TCP 或 WebSocket 连接到服务端，发送请求和通知。
 type Client struct {
 	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
-	*Conn
+	*netty.Conn
 
-	seqMgr *SeqManager
+	seqMgr *netty.SeqManager
 
 	// 读循环完成信号
 	readDone chan struct{}
@@ -57,17 +58,17 @@ func WithClientCRC(enable bool) ClientOption {
 // rawConn 是已建立的连接（由 Transport.Dial 返回）。
 func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
 	c := &Client{
-		Conn:      NewConn(context.Background(), rawConn),
-		seqMgr:    NewSeqManager(DefaultSeqLen),
+		Conn:      netty.NewConn(context.Background(), rawConn),
+		seqMgr:    netty.NewSeqManager(api.DefaultSeqLen),
 		readDone:  make(chan struct{}),
-		opcodeLen: DefaultOpcodeLen,
-		seqLen:    DefaultSeqLen,
+		opcodeLen: api.DefaultOpcodeLen,
+		seqLen:    api.DefaultSeqLen,
 		useCRC:    true,
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.seqMgr = NewSeqManager(c.seqLen)
+	c.seqMgr = netty.NewSeqManager(c.seqLen)
 	c.seqMgr.SetOnRetransmit(c.retransmit)
 
 	// 启动读循环
@@ -79,17 +80,17 @@ func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
 // SendRequest 发送一个需要应答的请求。
 // 自动分配序列号，等待响应或超时。
 // ctx 用于请求级别的超时控制。
-func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*PacketData, error) {
+func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*api.PacketData, error) {
 	if c.IsClosed() {
-		return nil, ErrConnClosed
+		return nil, api.ErrConnClosed
 	}
 
 	seq := c.seqMgr.Allocate()
 	if seq == 0 {
-		return nil, ErrConnClosed
+		return nil, api.ErrConnClosed
 	}
 
-	frame := NewRequestPacket(opcode, seq, body, true, c.useCRC)
+	frame := api.NewRequestPacket(opcode, seq, body, true, c.useCRC)
 	frame.Flags = frame.Flags.SetOpcodeLen(c.opcodeLen)
 	frame.Flags = frame.Flags.SetSeqLen(c.seqLen)
 
@@ -99,12 +100,12 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 	// 发送
 	if err := c.WritePacket(frame); err != nil {
 		c.seqMgr.Remove(seq)
-		return nil, WrapError("send request", err)
+		return nil, api.WrapError("send request", err)
 	}
 	c.requestsSent.Add(1)
 
 	// 等待响应
-	resp, err := WaitForResponse(ctx, pr)
+	resp, err := netty.WaitForResponse(ctx, pr)
 	if err != nil {
 		c.seqMgr.Remove(seq)
 		return nil, err
@@ -116,21 +117,21 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 // SendNotification 发送一个无需应答的单向通知。
 func (c *Client) SendNotification(opcode uint32, body []byte) error {
 	if c.IsClosed() {
-		return ErrConnClosed
+		return api.ErrConnClosed
 	}
 
-	frame := NewNotificationPacket(opcode, body, c.useCRC)
+	frame := api.NewNotificationPacket(opcode, body, c.useCRC)
 	frame.Flags = frame.Flags.SetOpcodeLen(c.opcodeLen)
 
 	if err := c.WritePacket(frame); err != nil {
-		return WrapError("send notification", err)
+		return api.WrapError("send notification", err)
 	}
 	c.notificationsSent.Add(1)
 	return nil
 }
 
 // retransmit 重传帧（由 SeqManager 在超时时调用）。
-func (c *Client) retransmit(f *PacketData) error {
+func (c *Client) retransmit(f *api.PacketData) error {
 	return c.WritePacket(f)
 }
 
@@ -191,7 +192,7 @@ type ClientStats struct {
 // 示例：
 //
 //	client, err := protoq.Dial(ctx, protoq.NewTCPTransport(), "127.0.0.1:9090")
-func Dial(ctx context.Context, transport Dialer, addr string, opts ...ClientOption) (*Client, error) {
+func Dial(ctx context.Context, transport api.Dialer, addr string, opts ...ClientOption) (*Client, error) {
 	conn, err := transport.Dial(ctx, addr)
 	if err != nil {
 		return nil, fmt.Errorf("protoq dial %s: %w", transport.Protocol(), err)

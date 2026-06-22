@@ -14,7 +14,6 @@ import (
 
 	api "github.com/oh-marshal/protoq"
 	codec "github.com/oh-marshal/protoq/basic/codec"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 )
 
 // ─── CodecRegister ──────────────────────────────────────────────────────────
@@ -71,7 +70,7 @@ func (r *CodecRegister) Match(encryptType uint16) api.Codec {
 		}
 	}
 	// 无匹配：返回 DefaultCodec 作为兜底（明文透传）
-	return &api.DefaultCodec{}
+	return &codec.Default{}
 }
 
 // ─── BeanRegister ────────────────────────────────────────────────────────────

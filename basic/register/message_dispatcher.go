@@ -5,15 +5,13 @@
 // EventDispatcher：按事件名将事件分发到已注册的 EventHandler。
 //
 // 响应帧直接完成 MessageQueue 中等待的 Future，不进入业务分发。
-package dispatcher
+package register
 
 import (
 	"fmt"
 	"sync"
 
 	api "github.com/oh-marshal/protoq"
-	register "github.com/oh-marshal/protoq/basic/register"
-	msgctx "github.com/oh-marshal/protoq/basic/register/context"
 )
 
 // MessageDispatcher 消息分发器。

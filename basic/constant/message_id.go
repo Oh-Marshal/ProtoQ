@@ -9,7 +9,6 @@
 package constant
 
 import (
-	message "github.com/oh-marshal/protoq/basic/message"
 )
 // ──────────────────────────────────────────────
 // 区段边界

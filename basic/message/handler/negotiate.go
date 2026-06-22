@@ -14,7 +14,6 @@ import (
 	constant "github.com/oh-marshal/protoq/basic/constant"
 	exception "github.com/oh-marshal/protoq/basic/exception"
 	message "github.com/oh-marshal/protoq/basic/message"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 )
 
 // NegotiatePayloadHandler 协商消息处理器。
@@ -32,10 +31,10 @@ import (
 //     - 设置 session_id 元数据（通过 Connection.SetProperty）
 //     - 返回序列化后的 NegotiateResponse
 //  5. 若 rejected：
-//     - 返回序列化后的拒绝响应 + ErrNegotiateFailed
+//     - 返回序列化后的拒绝响应 + exception.ErrNegotiateFailed
 type NegotiatePayloadHandler struct {
 	// Negotiator 协商策略（可插拔），nil 时使用 DefaultNegotiator
-	Negotiator Negotiator
+	Negotiator message.Negotiator
 
 	// sessionSeq 会话序列号生成器（原子自增）
 	sessionSeq atomic.Uint64
@@ -44,9 +43,9 @@ type NegotiatePayloadHandler struct {
 // NewNegotiatePayloadHandler 创建协商消息处理器。
 //
 // negotiator: 协商策略实现，nil 时使用 DefaultNegotiator。
-func NewNegotiatePayloadHandler(negotiator Negotiator) *NegotiatePayloadHandler {
+func NewNegotiatePayloadHandler(negotiator message.Negotiator) *NegotiatePayloadHandler {
 	if negotiator == nil {
-		negotiator = &DefaultNegotiator{}
+		negotiator = &message.DefaultNegotiator{}
 	}
 	return &NegotiatePayloadHandler{
 		Negotiator: negotiator,
@@ -60,7 +59,7 @@ func NewNegotiatePayloadHandler(negotiator Negotiator) *NegotiatePayloadHandler 
 //
 // 返回值：
 //   - []byte: 序列化后的 NegotiateResponse JSON
-//   - error: 协商失败时返回 ErrNegotiateFailed
+//   - error: 协商失败时返回 exception.ErrNegotiateFailed
 func (h *NegotiatePayloadHandler) Handle(ctx api.Context) ([]byte, error) {
 	frame := ctx.PacketData()
 	if frame == nil {
@@ -69,19 +68,19 @@ func (h *NegotiatePayloadHandler) Handle(ctx api.Context) ([]byte, error) {
 
 	// 1. 校验 Body 非空
 	if len(frame.Body) == 0 {
-		return h.marshalReject("协商请求体为空"), ErrNegotiateFailed
+		return h.marshalReject("协商请求体为空"), exception.ErrNegotiateFailed
 	}
 
 	// 2. 反序列化请求
-	req, err := UnmarshalNegotiateRequest(frame.Body)
+	req, err := message.UnmarshalNegotiateRequest(frame.Body)
 	if err != nil {
-		return h.marshalReject("无效的协商请求: " + err.Error()), ErrNegotiateFailed
+		return h.marshalReject("无效的协商请求: " + err.Error()), exception.ErrNegotiateFailed
 	}
 
 	// 3. 执行协商
 	neg := h.Negotiator
 	if neg == nil {
-		neg = &DefaultNegotiator{}
+		neg = &message.DefaultNegotiator{}
 	}
 	resp := neg.Negotiate(req)
 
@@ -95,14 +94,14 @@ func (h *NegotiatePayloadHandler) Handle(ctx api.Context) ([]byte, error) {
 
 		// 设置 CODEC_TYPE 属性（标记协商完成，对标 uni-protocol）
 		// 使用客户端的加密方案请求值（req.Encryption）作为 CODEC_TYPE
-		conn.SetProperty(ConnectionKeyCODEC_TYPE, req.Encryption)
+		conn.SetProperty(constant.ConnectionKeyCODEC_TYPE, req.Encryption)
 
 		// 设置 session_id 元数据
 		conn.SetProperty("session_id", resp.SessionID)
 	}
 
 	// 5. 序列化响应
-	respBody, err := MarshalNegotiateResponse(resp)
+	respBody, err := message.MarshalNegotiateResponse(resp)
 	if err != nil {
 		return nil, fmt.Errorf("biz: 序列化协商响应失败: %w", err)
 	}
@@ -111,7 +110,7 @@ func (h *NegotiatePayloadHandler) Handle(ctx api.Context) ([]byte, error) {
 	ctx.SetResponse(respBody)
 
 	if !resp.Accepted {
-		return respBody, ErrNegotiateFailed
+		return respBody, exception.ErrNegotiateFailed
 	}
 
 	return respBody, nil
@@ -119,11 +118,11 @@ func (h *NegotiatePayloadHandler) Handle(ctx api.Context) ([]byte, error) {
 
 // marshalReject 构造拒绝响应体（便捷方法）。
 func (h *NegotiatePayloadHandler) marshalReject(reason string) []byte {
-	resp := &NegotiateResponse{
+	resp := &message.NegotiateResponse{
 		Accepted:      false,
-		ServerVersion: ProtoVersion,
+		ServerVersion: message.ProtoVersion,
 		Reason:        reason,
 	}
-	body, _ := MarshalNegotiateResponse(resp)
+	body, _ := message.MarshalNegotiateResponse(resp)
 	return body
 }

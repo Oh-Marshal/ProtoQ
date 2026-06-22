@@ -42,3 +42,6 @@ const (
 	// HeartbeatLost 心跳丢失
 	HeartbeatLost
 )
+
+// ConnectionKeyCODEC_TYPE 连接属性键：编解码/加密类型。
+const ConnectionKeyCODEC_TYPE = "prop.codec.type"

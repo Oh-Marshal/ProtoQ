@@ -3,7 +3,7 @@
 // 对标 Java uni-protocol org.facelang.unified.proto.basic.register.context.MessageContext。
 // MessageContext 实现 api.Context 接口，承载单次请求的"连接 + 当前帧报文 + 响应载体"。
 // 在解码 → 过滤链 → 业务分发的 Pipeline 中传递，不提供发送能力（发送由 Connection 负责）。
-package context
+package register
 
 import api "github.com/oh-marshal/protoq"
 

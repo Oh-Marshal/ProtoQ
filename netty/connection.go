@@ -7,14 +7,13 @@
 package netty
 
 import (
+	codec "github.com/oh-marshal/protoq/basic/codec"
+	api "github.com/oh-marshal/protoq"
 	"context"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
-	codec "github.com/oh-marshal/protoq/basic/codec"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
-	server "github.com/oh-marshal/protoq/server"
 )
 
 // Conn 是 ProtoQ 连接的通用抽象，实现 Connection 接口。
@@ -41,9 +40,9 @@ type Conn struct {
 	// props 连接附加属性（对标 uni-protocol props）
 	props map[string]interface{}
 	// msgQueue ACK 等待队列
-	msgQueue *MessageQueue
+	msgQueue *api.MessageQueue
 	// codec 当前绑定的编解码器（协商后设置）
-	codec   Codec
+	codec   api.Codec
 	codecMu sync.RWMutex
 }
 
@@ -60,7 +59,7 @@ func NewConn(parentCtx context.Context, raw net.Conn) *Conn {
 		connectTime: time.Now(),
 		connType:    "tcp",
 		props:       make(map[string]interface{}),
-		msgQueue:    NewMessageQueue(),
+		msgQueue:    api.NewMessageQueue(),
 	}
 }
 
@@ -75,22 +74,22 @@ func NewConnWithID(parentCtx context.Context, raw net.Conn, id uint64, connType 
 // ─── 帧级读写 ──────────────────────────────────────────────────────────────
 
 // Decode 从流中解码一个完整的 ProtoQ 帧。
-func (c *Conn) Decode() (*PacketData, error) {
+func (c *Conn) Decode() (*api.PacketData, error) {
 	return c.decoder.Decode()
 }
 
 // WritePacket 线程安全地向连接写入一个帧（实现 Connection 接口）。
 // 写入前设置 5 秒写截止时间。
-func (c *Conn) WritePacket(f *PacketData) error {
+func (c *Conn) WritePacket(f *api.PacketData) error {
 	if c.closed.Load() {
-		return ErrConnClosed
+		return api.ErrConnClosed
 	}
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 
 	if c.closed.Load() {
-		return ErrConnClosed
+		return api.ErrConnClosed
 	}
 
 	c.raw.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -178,7 +177,7 @@ func (c *Conn) GetStringProperty(key string) (string, bool) {
 // ─── 消息队列 ──────────────────────────────────────────────────────────────
 
 // MessageQueue 返回 ACK 等待队列（实现 Connection 接口）。
-func (c *Conn) MessageQueue() *MessageQueue {
+func (c *Conn) MessageQueue() *api.MessageQueue {
 	return c.msgQueue
 }
 
@@ -186,17 +185,17 @@ func (c *Conn) MessageQueue() *MessageQueue {
 
 // Codec 获取当前连接绑定的编解码器（实现 Connection 接口）。
 // 协商前返回 DefaultCodec（明文透传）。
-func (c *Conn) Codec() Codec {
+func (c *Conn) Codec() api.Codec {
 	c.codecMu.RLock()
 	defer c.codecMu.RUnlock()
 	if c.codec == nil {
-		return &DefaultCodec{}
+		return &codec.Default{}
 	}
 	return c.codec
 }
 
 // SetCodec 设置当前连接绑定的编解码器。
-func (c *Conn) SetCodec(codec Codec) {
+func (c *Conn) SetCodec(codec api.Codec) {
 	c.codecMu.Lock()
 	defer c.codecMu.Unlock()
 	c.codec = codec
@@ -220,9 +219,9 @@ var nextSendSeq atomic.Uint64
 //  5. 返回响应 channel（调用方通过 select 等待）
 //
 // 响应帧由 MessageDispatcher.Dispatch 在收到响应时通过 MessageQueue.Complete 完成。
-func (c *Conn) Send(ctx Context, opcode uint32, body []byte) (<-chan *PacketData, error) {
+func (c *Conn) Send(ctx api.Context, opcode uint32, body []byte) (<-chan *api.PacketData, error) {
 	if c.IsClosed() {
-		return nil, ErrConnClosed
+		return nil, api.ErrConnClosed
 	}
 
 	// 生成序列号（对标 uni-protocol NEXT_OUT_SEQUENCE）
@@ -232,20 +231,20 @@ func (c *Conn) Send(ctx Context, opcode uint32, body []byte) (<-chan *PacketData
 	}
 
 	// 构建请求帧
-	frame := NewRequestPacket(opcode, seq, body, true, false)
+	frame := api.NewRequestPacket(opcode, seq, body, true, false)
 
 	// 创建响应 channel（缓冲 1，防止阻塞）
-	ch := make(chan *PacketData, 1)
+	ch := make(chan *api.PacketData, 1)
 
 	// 注册到 MessageQueue（对标 uni-protocol queue.put(sequence, future)）
 	if err := c.msgQueue.Put(seq, ch, 0); err != nil {
-		return nil, WrapError("send", err)
+		return nil, api.WrapError("send", err)
 	}
 
 	// 写出帧
 	if err := c.WritePacket(frame); err != nil {
 		c.msgQueue.CompleteError(seq)
-		return nil, WrapError("send", err)
+		return nil, api.WrapError("send", err)
 	}
 
 	return ch, nil

@@ -10,10 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	api "github.com/oh-marshal/protoq"
 	constant "github.com/oh-marshal/protoq/basic/constant"
 	exception "github.com/oh-marshal/protoq/basic/exception"
-	netty "github.com/oh-marshal/protoq/netty"
+	client "github.com/oh-marshal/protoq/client"
 )
 
 // ─── 协商选项 ────────────────────────────────────────────────────────────────
@@ -53,7 +52,7 @@ func WithNegotiateExtra(key, value string) NegotiateOption {
 // 对标 uni-protocol 客户端协商流程：发送协商请求 → 等待响应 → 设置 CODEC_TYPE。
 //
 // 必须在使用其他业务操作码之前调用。
-func Negotiate(ctx context.Context, client *api.Client, opts ...NegotiateOption) (*NegotiateResponse, error) {
+func Negotiate(ctx context.Context, client *client.Client, opts ...NegotiateOption) (*NegotiateResponse, error) {
 	// 1. 构建协商请求
 	req := &NegotiateRequest{
 		Version:    ProtoVersion,
@@ -69,7 +68,7 @@ func Negotiate(ctx context.Context, client *api.Client, opts ...NegotiateOption)
 	}
 
 	// 2. 通过 Client.SendRequest 发送
-	respFrame, err := client.SendRequest(ctx, OpcodeNegotiate, reqBody)
+	respFrame, err := client.SendRequest(ctx, constant.OpcodeNegotiate, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("biz: 协商失败: %w", err)
 	}
@@ -81,11 +80,11 @@ func Negotiate(ctx context.Context, client *api.Client, opts ...NegotiateOption)
 	}
 
 	if !resp.Accepted {
-		return resp, ErrNegotiateFailed
+		return resp, exception.ErrNegotiateFailed
 	}
 
 	// 4. 协商成功：设置 CODEC_TYPE 属性
-	client.SetProperty(ConnectionKeyCODEC_TYPE, req.Encryption)
+	client.SetProperty(constant.ConnectionKeyCODEC_TYPE, req.Encryption)
 	if resp.SessionID != "" {
 		client.SetProperty("session_id", resp.SessionID)
 	}
@@ -94,7 +93,7 @@ func Negotiate(ctx context.Context, client *api.Client, opts ...NegotiateOption)
 }
 
 // MustNegotiate 执行协商，失败时 panic（仅用于初始化阶段）。
-func MustNegotiate(ctx context.Context, client *api.Client, opts ...NegotiateOption) *NegotiateResponse {
+func MustNegotiate(ctx context.Context, client *client.Client, opts ...NegotiateOption) *NegotiateResponse {
 	resp, err := Negotiate(ctx, client, opts...)
 	if err != nil {
 		panic("biz: 协商失败: " + err.Error())
@@ -122,9 +121,9 @@ type HeartbeatLoopConfig struct {
 // DefaultHeartbeatLoopConfig 返回默认心跳循环配置。
 func DefaultHeartbeatLoopConfig() *HeartbeatLoopConfig {
 	return &HeartbeatLoopConfig{
-		Interval:  HeartbeatInterval,
-		Timeout:   HeartbeatTimeout,
-		MaxMissed: HeartbeatMaxMissed,
+		Interval:  constant.HeartbeatInterval,
+		Timeout:   constant.HeartbeatTimeout,
+		MaxMissed: constant.HeartbeatMaxMissed,
 	}
 }
 
@@ -134,7 +133,7 @@ func DefaultHeartbeatLoopConfig() *HeartbeatLoopConfig {
 // 使用 Client.SendRequest 发送心跳 PING，等待 PONG 响应。
 // 返回一个 stop 函数，调用它即可停止心跳。
 // 心跳丢失时，默认行为是调用 OnLost 回调。
-func StartHeartbeat(client *api.Client, cfg *HeartbeatLoopConfig) (stop func()) {
+func StartHeartbeat(client *client.Client, cfg *HeartbeatLoopConfig) (stop func()) {
 	if cfg == nil {
 		cfg = DefaultHeartbeatLoopConfig()
 	}
@@ -160,7 +159,7 @@ func StartHeartbeat(client *api.Client, cfg *HeartbeatLoopConfig) (stop func()) 
 				}
 
 				reqCtx, reqCancel := context.WithTimeout(ctx, cfg.Timeout)
-				_, err := client.SendRequest(reqCtx, OpcodeHeartbeat, nil)
+				_, err := client.SendRequest(reqCtx, constant.OpcodeHeartbeat, nil)
 				reqCancel()
 
 				if err != nil {

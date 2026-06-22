@@ -1,6 +1,7 @@
 package netty
 
 import (
+	api "github.com/oh-marshal/protoq"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -31,7 +32,7 @@ type Decoder struct {
 	state int
 
 	// 当前帧的元数据
-	curFlags      Flags
+	curFlags      api.Flags
 	curOpcodeLen  int
 	curSeqLen     int
 	curCRCLen     int
@@ -59,14 +60,14 @@ func NewDecoder(r io.Reader) *Decoder {
 // Decode 从流中读取并解码一个完整的 ProtoQ 帧。
 // 在遇到 io.EOF 且缓冲区无完整帧时返回 io.EOF。
 // 其他 I/O 错误直接返回。
-func (d *Decoder) Decode() (*PacketData, error) {
+func (d *Decoder) Decode() (*api.PacketData, error) {
 	for {
 		switch d.state {
 		case stateMagic:
 			if err := d.ensureBytes(1); err != nil {
 				return nil, err
 			}
-			if d.buf[d.bufPos] != MagicByte {
+			if d.buf[d.bufPos] != api.MagicByte {
 				// 不是 Magic 字节，跳过并重试（用于从流中同步）
 				d.bufPos++
 				d.bytesConsumed++
@@ -88,7 +89,7 @@ func (d *Decoder) Decode() (*PacketData, error) {
 					return nil, err
 				}
 			}
-			d.curFlags = Flags(d.buf[flagsPos])
+			d.curFlags = api.Flags(d.buf[flagsPos])
 			d.bufPos = flagsPos + 1
 			d.bytesConsumed += uint64(d.bufPos - flagsPos)
 
@@ -193,10 +194,10 @@ func (d *Decoder) Decode() (*PacketData, error) {
 func (d *Decoder) ensureBytes(n int) error {
 	for len(d.buf)-d.bufPos < n {
 		// 确保缓冲区有空间读取更多数据
-		if cap(d.buf)-len(d.buf) < ReadBufferSize {
+		if cap(d.buf)-len(d.buf) < api.ReadBufferSize {
 			newCap := cap(d.buf) * 2
-			if newCap < ReadBufferSize {
-				newCap = ReadBufferSize
+			if newCap < api.ReadBufferSize {
+				newCap = api.ReadBufferSize
 			}
 			newBuf := make([]byte, len(d.buf), newCap)
 			copy(newBuf, d.buf)
@@ -234,7 +235,7 @@ func (d *Decoder) compact() {
 }
 
 // buildFrame 从缓冲区构建 PacketData 对象。
-func (d *Decoder) buildFrame() (*PacketData, error) {
+func (d *Decoder) buildFrame() (*api.PacketData, error) {
 	pos := d.curFrameStart
 
 	// Magic (已跳过)
@@ -249,11 +250,11 @@ func (d *Decoder) buildFrame() (*PacketData, error) {
 	}
 
 	// Opcode
-	opcode := ReadUintN(d.buf[pos:], d.curOpcodeLen)
+	opcode := api.ReadUintN(d.buf[pos:], d.curOpcodeLen)
 	pos += d.curOpcodeLen
 
 	// Seq
-	seq := ReadUintN(d.buf[pos:], d.curSeqLen)
+	seq := api.ReadUintN(d.buf[pos:], d.curSeqLen)
 	pos += d.curSeqLen
 
 	// Body
@@ -271,7 +272,7 @@ func (d *Decoder) buildFrame() (*PacketData, error) {
 		expectedCRC := d.buf[pos : pos+d.curCRCLen]
 		crcData := d.buf[crcStart:crcEnd]
 		if !VerifyCRC(crcData, expectedCRC, d.curCRCLen) {
-			return nil, ErrCRCMismatch
+			return nil, api.ErrCRCMismatch
 		}
 		pos += d.curCRCLen
 	}
@@ -281,7 +282,7 @@ func (d *Decoder) buildFrame() (*PacketData, error) {
 		return nil, err
 	}
 
-	return &PacketData{
+	return &api.PacketData{
 		Flags:  d.curFlags,
 		Opcode: opcode,
 		Seq:    seq,

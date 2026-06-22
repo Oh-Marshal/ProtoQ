@@ -1,6 +1,7 @@
 package netty
 
 import (
+	api "github.com/oh-marshal/protoq"
 	"context"
 	"sync"
 	"time"
@@ -11,8 +12,8 @@ import (
 // done 通道在请求被解决（响应到达或放弃）时关闭，通知 retryLoop 退出。
 type PendingRequest struct {
 	Seq       uint32
-	PacketData     *PacketData      // 原始请求帧（用于重传）
-	ResponseC chan *PacketData // 响应通道，仅由 WaitForResponse 消费
+	PacketData     *api.PacketData      // 原始请求帧（用于重传）
+	ResponseC chan *api.PacketData // 响应通道，仅由 WaitForResponse 消费
 	ErrC      chan error  // 错误通道（超时、重传耗尽、连接关闭）
 	Retries   int
 	CreatedAt time.Time
@@ -34,25 +35,25 @@ type SeqManager struct {
 	retryTimeout time.Duration // 初始重传超时
 
 	// 回调：当需要重传时调用
-	onRetransmit func(frame *PacketData) error
+	onRetransmit func(frame *api.PacketData) error
 }
 
 // NewSeqManager 创建一个新的序列号管理器。
 // seqLen: 序列号长度（2 或 4 字节）
 func NewSeqManager(seqLen int) *SeqManager {
 	if seqLen != 2 && seqLen != 4 {
-		seqLen = DefaultSeqLen
+		seqLen = api.DefaultSeqLen
 	}
 	return &SeqManager{
 		next:         1, // 从 1 开始，0 表示无序列号
 		pending:      make(map[uint32]*PendingRequest),
 		seqLen:       seqLen,
-		retryTimeout: DefaultRetryTimeout,
+		retryTimeout: api.DefaultRetryTimeout,
 	}
 }
 
 // SetOnRetransmit 设置重传回调。
-func (sm *SeqManager) SetOnRetransmit(fn func(frame *PacketData) error) {
+func (sm *SeqManager) SetOnRetransmit(fn func(frame *api.PacketData) error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.onRetransmit = fn
@@ -71,9 +72,9 @@ func (sm *SeqManager) Allocate() uint32 {
 	seq := sm.next
 	sm.next++
 	if sm.seqLen == 2 {
-		sm.next %= MaxSeq16
+		sm.next %= api.MaxSeq16
 	} else {
-		sm.next %= MaxSeq32
+		sm.next %= api.MaxSeq32
 	}
 	if sm.next == 0 {
 		sm.next = 1
@@ -90,14 +91,14 @@ func (sm *SeqManager) Allocate() uint32 {
 }
 
 // Enqueue 将请求加入待确认队列并启动超时定时器。
-func (sm *SeqManager) Enqueue(seq uint32, frame *PacketData) *PendingRequest {
+func (sm *SeqManager) Enqueue(seq uint32, frame *api.PacketData) *PendingRequest {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	pr := &PendingRequest{
 		Seq:       seq,
 		PacketData:     frame,
-		ResponseC: make(chan *PacketData, 1),
+		ResponseC: make(chan *api.PacketData, 1),
 		ErrC:      make(chan error, 1),
 		Retries:   0,
 		CreatedAt: time.Now(),
@@ -113,7 +114,7 @@ func (sm *SeqManager) Enqueue(seq uint32, frame *PacketData) *PendingRequest {
 
 // Resolve 处理收到的响应，将响应交付给等待者。
 // 返回 true 表示找到了对应的待确认请求。
-func (sm *SeqManager) Resolve(seq uint32, response *PacketData) bool {
+func (sm *SeqManager) Resolve(seq uint32, response *api.PacketData) bool {
 	sm.mu.Lock()
 	pr, ok := sm.pending[seq]
 	if ok {
@@ -156,14 +157,14 @@ func (sm *SeqManager) retryLoop(seq uint32, pr *PendingRequest) {
 			onRetransmit := sm.onRetransmit
 			sm.mu.Unlock()
 
-			if currentRetries > MaxRetries {
+			if currentRetries > api.MaxRetries {
 				// 超过最大重传次数
 				sm.mu.Lock()
 				delete(sm.pending, seq)
 				sm.mu.Unlock()
 				close(pr.done)
 				select {
-				case pr.ErrC <- ErrMaxRetries:
+				case pr.ErrC <- api.ErrMaxRetries:
 				default:
 				}
 				timer.Stop()
@@ -178,7 +179,7 @@ func (sm *SeqManager) retryLoop(seq uint32, pr *PendingRequest) {
 					sm.mu.Unlock()
 					close(pr.done)
 					select {
-					case pr.ErrC <- WrapError("retransmit", err):
+					case pr.ErrC <- api.WrapError("retransmit", err):
 					default:
 					}
 					timer.Stop()
@@ -229,7 +230,7 @@ func (sm *SeqManager) Close() error {
 		delete(sm.pending, seq)
 		close(pr.done)
 		select {
-		case pr.ErrC <- ErrConnClosed:
+		case pr.ErrC <- api.ErrConnClosed:
 		default:
 		}
 	}
@@ -237,7 +238,7 @@ func (sm *SeqManager) Close() error {
 }
 
 // WaitForResponse 等待指定序列号的响应（带 context 超时）。
-func WaitForResponse(ctx context.Context, pr *PendingRequest) (*PacketData, error) {
+func WaitForResponse(ctx context.Context, pr *PendingRequest) (*api.PacketData, error) {
 	select {
 	case resp := <-pr.ResponseC:
 		return resp, nil

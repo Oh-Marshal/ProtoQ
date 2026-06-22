@@ -16,7 +16,6 @@ import (
 
 	api "github.com/oh-marshal/protoq"
 	register "github.com/oh-marshal/protoq/basic/register"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 )
 
 // negotiateMessageID 协商消息的 messageId（Opcode 低字节）。
@@ -29,7 +28,7 @@ const (
 // ConnectionBridge 连接级消息桥接器。
 //
 // 对标 uni-protocol NettyMessageBridge（ChannelDuplexHandler）。
-// 持有 BeanRegister（含 CodecRegister、MessageDispatcher、EventDispatcher）、
+// 持有 register.BeanRegister（含 CodecRegister、MessageDispatcher、EventDispatcher）、
 // 连接引用和写 channel。每个连接创建一个实例，运行读循环和写循环。
 //
 // 核心职责：
@@ -38,10 +37,10 @@ const (
 //   - 错误处理：致命错误关闭连接
 type ConnectionBridge struct {
 	// conn 底层连接（*Conn，需要 frame 级读写能力）
-	conn *api.Conn
+	conn *Conn
 
 	// beanReg Bean 注册中心（含 CodecRegister、MessageDispatcher、EventDispatcher）
-	beanReg *BeanRegister
+	beanReg *register.BeanRegister
 
 	// writeCh 出站帧写入通道（由 Send/WritePacket 触发）
 	writeCh chan *api.PacketData
@@ -60,7 +59,7 @@ type ConnectionBridge struct {
 // 参数：
 //   - conn: 底层连接（*Conn，提供 Decode/WritePacket 等传输层操作）
 //   - beanReg: Bean 注册中心（已注册 Codec/Filter/Handler）
-func NewConnectionBridge(conn *api.Conn, beanReg *BeanRegister) *ConnectionBridge {
+func NewConnectionBridge(conn *Conn, beanReg *register.BeanRegister) *ConnectionBridge {
 	return &ConnectionBridge{
 		conn:    conn,
 		beanReg: beanReg,
@@ -362,6 +361,6 @@ func (b *ConnectionBridge) Done() <-chan struct{} {
 }
 
 // Conn 返回底层连接（用于外部访问连接属性）。
-func (b *ConnectionBridge) Conn() *api.Conn {
+func (b *ConnectionBridge) Conn() *Conn {
 	return b.conn
 }

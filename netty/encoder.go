@@ -1,12 +1,13 @@
 package netty
 
 import (
+	api "github.com/oh-marshal/protoq"
 	"encoding/binary"
 )
 
-// Encode 将 PacketData 编码为网络字节序的完整帧（含 Magic、Flags、Padding）。
+// Encode 将 api.PacketData 编码为网络字节序的完整帧（含 Magic、Flags、Padding）。
 // 返回的字节切片包含完整的可发送帧。
-func Encode(f *PacketData) ([]byte, error) {
+func Encode(f *api.PacketData) ([]byte, error) {
 	if err := f.Flags.Validate(len(f.Body) > 0); err != nil {
 		return nil, err
 	}
@@ -32,7 +33,7 @@ func Encode(f *PacketData) ([]byte, error) {
 	offset := 0
 
 	// Magic
-	buf[offset] = MagicByte
+	buf[offset] = api.MagicByte
 	offset++
 
 	// Flags
@@ -48,11 +49,11 @@ func Encode(f *PacketData) ([]byte, error) {
 	}
 
 	// Opcode
-	PutUintN(buf[offset:], f.Opcode, opcodeLen)
+	api.PutUintN(buf[offset:], f.Opcode, opcodeLen)
 	offset += opcodeLen
 
 	// Seq
-	PutUintN(buf[offset:], f.Seq, seqLen)
+	api.PutUintN(buf[offset:], f.Seq, seqLen)
 	offset += seqLen
 
 	// Body
@@ -78,9 +79,9 @@ func Encode(f *PacketData) ([]byte, error) {
 	return buf, nil
 }
 
-// EncodeTo 将 PacketData 编码后写入 Writer（如 net.Conn 或 bytes.Buffer）。
+// EncodeTo 将 api.PacketData 编码后写入 Writer（如 net.Conn 或 bytes.Buffer）。
 // 返回写入的字节数和可能的错误。
-func EncodeTo(f *PacketData, w interface{ Write([]byte) (int, error) }) (int, error) {
+func EncodeTo(f *api.PacketData, w interface{ Write([]byte) (int, error) }) (int, error) {
 	data, err := Encode(f)
 	if err != nil {
 		return 0, err
@@ -89,7 +90,7 @@ func EncodeTo(f *PacketData, w interface{ Write([]byte) (int, error) }) (int, er
 }
 
 // MustEncode 编码帧，失败时 panic（仅用于测试）。
-func MustEncode(f *PacketData) []byte {
+func MustEncode(f *api.PacketData) []byte {
 	data, err := Encode(f)
 	if err != nil {
 		panic(err)

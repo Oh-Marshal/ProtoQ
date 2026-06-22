@@ -15,8 +15,6 @@ package message
 import (
 	"encoding/json"
 	"fmt"
-	constant "github.com/oh-marshal/protoq/basic/constant"
-	msghandler "github.com/oh-marshal/protoq/basic/message/handler"
 )
 
 // ──────────────────────────────────────────────

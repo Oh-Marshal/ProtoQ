@@ -13,8 +13,6 @@ import (
 	"time"
 
 	api "github.com/oh-marshal/protoq"
-	constant "github.com/oh-marshal/protoq/basic/constant"
-	dispatcher "github.com/oh-marshal/protoq/basic/register/dispatcher"
 )
 
 // HeartbeatPayloadHandler 心跳消息处理器。
