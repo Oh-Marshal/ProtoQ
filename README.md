@@ -1,10 +1,8 @@
 # ProtoQ
 
-纯 Go 标准库实现的自定义二进制网络协议，支持请求-应答和单向通知，内置 CRC 校验、序列号管理和超时重传。
+**Pro**tocol + **Q** = ProtoQ。Q 一语双关：既是 **Queue（队列）**——协议的异步消息队列与 ACK 等待机制，也是 **Quick（快速）**——高效多路并发、低延迟的协议本质。ProtoQ 是一款纯 Go 标准库实现的自定义二进制网络协议，支持请求-应答与单向通知，内置 CRC 校验、序列号管理、超时重传、多路并发。
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://go.dev/)
-[![Tests](https://img.shields.io/badge/tests-12/12%20pass-brightgreen)](.)
-[![Race](https://img.shields.io/badge/race-clean-brightgreen)](.)
 [![Deps](https://img.shields.io/badge/deps-zero-blue)](.)
 
 ## 特性
@@ -15,6 +13,9 @@
 - **序列号管理**：16/32 位自增序列号，待确认队列，指数退避超时重传（最多 3 次）
 - **流式解码器**：基于状态机处理 TCP 粘包、半包、噪声同步
 - **多传输层**：TCP、WebSocket（纯标准库 RFC 6455）、QUIC（接口预留）
+- **内容协商**：连接建立后客户端自动协商协议版本、加密方案、认证凭证
+- **过滤器链**：对标 Servlet Filter 的中间件链，支持协商检查、认证鉴权、日志、限流
+- **消息分发**：按 messageId 自动分发请求到注册的 Handler，响应帧自动完成 ACK
 - **并发安全**：客户端多 goroutine 并发请求，服务端每连接独立 goroutine
 - **零依赖**：仅使用 Go 标准库
 
@@ -23,7 +24,7 @@
 ### 安装
 
 ```bash
-git clone <repo-url> protoq
+git clone git@github.com:Oh-Marshal/ProtoQ.git
 cd protoq
 ```
 
@@ -47,126 +48,10 @@ go run ./examples/echo/ -mode server -transport ws -addr :8080
 go run ./examples/echo/ -mode client -transport tcp -addr :9090
 ```
 
-输出示例：
-
-```
-已连接到 ProtoQ 服务端 [tcp] :9090
---- 测试 1: Echo 请求 ---
-响应: ECHO: Hello ProtoQ!
---- 测试 2: 时间查询 ---
-服务端时间: 2026-06-07T20:47:06+08:00
---- 测试 3: 单向通知 ---
-通知已发送
---- 测试 4: 状态查询 ---
-服务端状态: server up, conns=1
---- 测试 5: 并发请求 ---
-  并发 #3: ECHO: 并发消息 #3
-  并发 #4: ECHO: 并发消息 #4
-  ...
---- 客户端统计 ---
-  已发送请求: 8
-  已收到响应: 8
-  已发送通知: 1
-  待确认请求: 0
-```
-
 ### 运行测试
 
 ```bash
 go test -v -race ./...
-```
-
-```
-=== RUN   TestEncodeDecode
---- PASS: TestEncodeDecode (0.00s)
-=== RUN   TestDecodeStickyPackets
---- PASS: TestDecodeStickyPackets (0.00s)
-=== RUN   TestDecodeHalfPacket
---- PASS: TestDecodeHalfPacket (0.00s)
-=== RUN   TestRequestResponseMatching
---- PASS: TestRequestResponseMatching (0.00s)
-=== RUN   TestMultipleRequests
---- PASS: TestMultipleRequests (0.01s)
-...
-PASS
-ok      github.com/oh-marshal/protoq   1.066s
-```
-
-## API 概览
-
-### 服务端
-
-```go
-// 创建服务端（选择传输层）
-server := protoq.NewServer(protoq.NewTCPTransport())
-
-// 注册 Opcode 处理函数
-server.Handle(0x0001, func(opcode uint32, body []byte) ([]byte, error) {
-    return []byte("ECHO: " + string(body)), nil
-})
-
-// 启动监听（阻塞）
-ctx, cancel := context.WithCancel(context.Background())
-go server.ListenAndServe(ctx, ":9090")
-
-// 优雅关闭
-cancel()
-server.Shutdown()
-```
-
-### 客户端
-
-```go
-// 连接到服务端
-client, err := protoq.Dial(ctx, protoq.NewTCPTransport(), "127.0.0.1:9090")
-defer client.Close()
-
-// 发送请求（自动分配序列号，等待应答）
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-resp, err := client.SendRequest(ctx, 0x0001, []byte("hello"))
-cancel()
-// resp.Opcode, resp.Seq, resp.Body
-
-// 发送通知（无应答，无序列号）
-err := client.SendNotification(0x00FF, []byte("heartbeat"))
-
-// 查看统计
-stats := client.Stats()
-// stats.RequestsSent, stats.ResponsesReceived, ...
-```
-
-### 自定义传输层
-
-```go
-type MyTransport struct{}
-
-func (t *MyTransport) Dial(ctx context.Context, addr string) (net.Conn, error) {
-    // 实现连接逻辑
-}
-func (t *MyTransport) Listen(ctx context.Context, addr string) (net.Listener, error) {
-    // 实现监听逻辑
-}
-func (t *MyTransport) String() string { return "myproto" }
-
-// 使用
-client, _ := protoq.Dial(ctx, &MyTransport{}, "addr")
-server := protoq.NewServer(&MyTransport{})
-```
-
-### 直接使用编解码
-
-```go
-// 编码
-frame := protoq.NewRequestFrame(0x0001, 0x0001, []byte("data"), true, true)
-data, err := protoq.Encode(frame)
-
-// 解码（从 io.Reader 流式读取）
-decoder := protoq.NewDecoder(conn)
-for {
-    frame, err := decoder.Decode()
-    if err == io.EOF { break }
-    // 处理 frame
-}
 ```
 
 ## 协议帧格式
@@ -179,7 +64,7 @@ for {
 [Magic:1][Flags:1][Opcode:0/2/4][Seq:0/2/4][CRC:0/2/4][Padding:0-3]
 ```
 
-- Magic = `0x51` ('Q')
+- Magic = `0x51` ('Q')——呼应 ProtoQ 中的 Q
 - Flags 位图控制各字段存在性和长度
 - Length = Opcode + Seq + Body + CRC（不含 Magic/Flags/Length/Padding）
 - Padding 使帧对齐到 4 字节边界
@@ -188,62 +73,118 @@ for {
 
 ## 项目结构
 
+对标 Java uni-protocol 的多模块分层架构，适配 Go 单 module 多子包模式：
+
 ```
 protoq/
-├── go.mod                         # Go 模块定义
-├── doc.go                         # 包文档
-├── flags.go                       # Flags 位图定义与操作
-├── errors.go                      # 错误类型
-├── crc.go                         # CRC-16-IBM / CRC-32-IEEE
-├── frame.go                       # Frame 结构体与工厂方法
-├── encoder.go                     # 帧编码器（含对齐填充）
-├── decoder.go                     # 流式解码器状态机
-├── seq.go                         # 序列号管理与重传
-├── transport.go                   # Transport/Dialer/ListenerFactory 接口
-├── client.go                      # 客户端
-├── server.go                      # 服务端
-├── protoq_test.go                 # 单元测试（12 项）
+├── go.mod
 │
-├── transport/                     # 传输层实现子包
-│   ├── doc.go
-│   ├── transport_tcp.go           # TCP 传输
-│   ├── transport_ws.go            # WebSocket 传输（纯标准库 RFC 6455）
-│   └── transport_quic.go          # QUIC 桩（预留）
+├── codec.go                 ← Codec + Converter 接口（protocol-api）
+├── connection.go            ← Connection 接口
+├── context.go               ← Context 接口
+├── filter.go                ← Filter + FilterChain 接口
+├── message_server.go        ← MessageServer 接口
+├── message_queue.go         ← MessageQueue（ACK 等待队列）
+├── packet.go                ← PacketData（帧数据对象）
+├── packet_envelope.go       ← PacketEnvelope（出站消息信封）
+├── address.go               ← NetworkAddress + NetworkConfig
+├── flags.go                 ← Flags 位图
+├── constants.go             ← 协议常量
+├── errors.go                ← 错误定义
+├── transport.go             ← Transport/Dialer/ListenerFactory 接口
 │
-├── biz/                           # 业务协议层（类型安全 Handler / 路由 / 中间件）
-│   ├── doc.go
-│   └── opcode.go                  # 业务 Opcode 常量
+├── basic/                   ← 业务协议层（protocol-basic）
+│   ├── codec/               ← DefaultCodec + 转换器
+│   │   └── convert/
+│   ├── constant/            ← MessageId / ConnectionKey / 心跳常量
+│   ├── exception/           ← 协议异常（NegotiateException 等）
+│   ├── filter/              ← NegotiateFilter
+│   ├── message/             ← 协商/心跳/事件负载
+│   │   └── handler/         ← NegotiatePayloadHandler / HeartbeatPayloadHandler
+│   └── register/            ← BeanRegister / MessageDispatcher / EventDispatcher
 │
-├── examples/                      # 教学示例
-│   └── echo/
-│       └── main.go
+├── netty/                   ← 传输层实现（protocol-netty）
+│   ├── connection.go        ← NettyConnection
+│   ├── bridge.go            ← NettyMessageBridge（读写循环）
+│   ├── decoder.go           ← NettyMessageDecoder（状态机解码）
+│   ├── encoder.go           ← NettyMessageEncoder（帧编码）
+│   ├── seq.go               ← SeqManager（序列号 + 重传）
+│   ├── crc.go               ← CRC 校验
+│   ├── tcp.go               ← TCP 传输
+│   ├── ws.go                ← WebSocket 传输
+│   └── quic.go              ← QUIC 桩（预留）
 │
-├── apps/                          # 应用入口（预留）
-│   └── .gitkeep
+├── client/                  ← 客户端（protocol-client）
+├── server/                  ← 服务端（protocol-server）
+├── websocket/               ← WebSocket 专用桥接（protocol-websocket）
 │
-├── DESIGN.md                      # 详细设计文档
-└── README.md                      # 本文件
+├── examples/echo/           ← Echo 示例（集成协商 + 心跳 + 认证）
+└── apps/                    ← 应用入口（预留）
 ```
 
-## 配置选项
-
-### 客户端
-
-```go
-protoq.Dial(ctx, transport, addr,
-    protoq.WithClientOpcodeLen(2),   // Opcode 字段长度 (0/2/4)
-    protoq.WithClientSeqLen(2),      // Seq 字段长度 (2/4)
-    protoq.WithClientCRC(true),      // 是否启用 CRC
-)
-```
+## API 概览
 
 ### 服务端
 
 ```go
-protoq.NewServer(transport,
-    protoq.WithServerOpcodeLen(2),   // Opcode 字段长度
-)
+// 创建服务端
+server := serverpkg.NewServer(netty.NewTCPTransport())
+
+// 注册协商 + 心跳 Handler（biz 层辅助）
+negotiator := &message.DefaultNegotiator{}
+server.Handle(constant.OpcodeNegotiate, makeNegotiateHandler(negotiator))
+server.Handle(constant.OpcodeHeartbeat, makeHeartbeatHandler())
+
+// 注册业务 Handler
+server.Handle(0x0100, func(ctx *serverpkg.ConnContext, opcode uint32, body []byte) ([]byte, error) {
+    return []byte("ECHO: " + string(body)), nil
+})
+
+// 启动监听
+go server.ListenAndServe(ctx, ":9090")
 ```
+
+### 客户端
+
+```go
+// 连接 + 协商 + 心跳
+client, _ := client.Dial(ctx, netty.NewTCPTransport(), ":9090")
+resp, _ := message.Negotiate(ctx, client, message.WithAuth("token"))
+stopHB := message.StartHeartbeat(client, nil)
+defer stopHB()
+
+// 发送请求
+respFrame, _ := client.SendRequest(ctx, 0x0100, []byte("hello"))
+client.Close()
+```
+
+### 直接使用编解码
+
+```go
+// 编码
+packet := protoq.NewRequestPacket(0x0001, 0x0001, []byte("data"), true, true)
+data, _ := netty.Encode(packet)
+
+// 解码（从 io.Reader 流式读取）
+decoder := netty.NewDecoder(conn)
+for {
+    packet, err := decoder.DecodePacket()
+    if err == io.EOF { break }
+    // 处理 packet
+}
+```
+
+## 命名由来
+
+**ProtoQ** = **Proto**col + **Q**。
+
+Q 承载双重含义：
+
+- **Queue（队列）**——协议的 `MessageQueue` 是核心机制：每个连接持有 ACK 等待队列（`put → get → complete`），配合 `SeqManager` 的序列号分配与 `PendingRequest` 重传循环，实现异步请求-应答的可靠匹配。这与传统 RPC 的同步阻塞模型截然不同——ProtoQ 的队列机制让单连接可以同时承载多个未完成请求，真正实现多路并发。
+
+- **Quick（快速）**——从线格式设计层面追求极致效率：可变长度字段由 Flags 位图逐帧控制（用多少占多少，不为零值浪费字节）；流式解码器基于状态机处理粘包/半包，零拷贝读取；CRC-16 轻量校验兼顾安全与速度。协议头最小仅 2 字节（Magic + Flags），足以完成简单通知的投递。
+
+两者互为表里：Queue 保证了并发的秩序与可靠性，Quick 保证了单次交互的低延迟——这正是 ProtoQ 作为高效多路并发协议的设计哲学。
 
 ## 许可证
 
