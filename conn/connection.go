@@ -4,7 +4,7 @@
 // 消息队列、属性存储和编解码器绑定。
 // 对标 Java uni-protocol 的 NettyConnection，实现 Connection 接口。
 // 同时被服务端（通过 ConnContext）和客户端（通过 Client）复用。
-package netty
+package conn
 
 import (
 	codec "github.com/oh-marshal/protoq/basic/codec"

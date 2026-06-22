@@ -7,7 +7,7 @@
 //
 //	import (
 //	    "github.com/oh-marshal/protoq"
-//	    "github.com/oh-marshal/protoq/netty"
+//	    "github.com/oh-marshal/protoq/conn"
 //	)
 //
 //	// TCP
@@ -17,4 +17,4 @@
 //	// WebSocket
 //	client, _ := protoq.Dial(ctx, transport.NewWSTransport(), "127.0.0.1:9090")
 //	server := protoq.NewServer(transport.NewWSTransport())
-package netty
+package conn

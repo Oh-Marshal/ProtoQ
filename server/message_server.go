@@ -1,6 +1,6 @@
 // Package biz — 服务端实现
 //
-// 对标 Java uni-protocol org.facelang.unified.proto.netty.server.NettyMessageServer。
+// 对标 Java uni-protocol org.facelang.unified.proto.conn.server.NettyMessageServer。
 // MessageServer 聚合 BeanRegister，通过 Register() 注册 Codec/Filter/Handler，
 // 为每个连接创建 ConnectionBridge 并启动读写循环。
 //
@@ -37,7 +37,7 @@ import (
 	message "github.com/oh-marshal/protoq/basic/message"
 	msghandler "github.com/oh-marshal/protoq/basic/message/handler"
 	register "github.com/oh-marshal/protoq/basic/register"
-	netty "github.com/oh-marshal/protoq/netty"
+	connpkg "github.com/oh-marshal/protoq/conn"
 )
 
 // MessageServer 协议消息服务器。
@@ -63,7 +63,7 @@ type MessageServer struct {
 	heartbeatHandler *msghandler.HeartbeatPayloadHandler
 
 	// 连接管理
-	conns   map[*netty.ConnectionBridge]struct{}
+	conns   map[*connpkg.ConnectionBridge]struct{}
 	connsMu sync.Mutex
 
 	// 状态
@@ -94,7 +94,7 @@ func NewMessageServer(opts ...MessageServerOption) *MessageServer {
 	srv := &MessageServer{
 		beanRegister: register.NewBeanRegister(),
 		negotiator:   &message.DefaultNegotiator{},
-		conns:        make(map[*netty.ConnectionBridge]struct{}),
+		conns:        make(map[*connpkg.ConnectionBridge]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -162,9 +162,9 @@ func (s *MessageServer) BeanRegister() *register.BeanRegister {
 //  5. 连接关闭后清理
 func (s *MessageServer) Serve(rawConn net.Conn) {
 	connID := s.connIDSeq.Add(1)
-	conn := netty.NewConnWithID(nil, rawConn, connID, "tcp")
+	conn := connpkg.NewConnWithID(nil, rawConn, connID, "tcp")
 
-	bridge := netty.NewConnectionBridge(conn, s.beanRegister)
+	bridge := connpkg.NewConnectionBridge(conn, s.beanRegister)
 
 	// 注册连接
 	s.connsMu.Lock()
@@ -189,8 +189,8 @@ func (s *MessageServer) Serve(rawConn net.Conn) {
 //
 // 用于已建立的 Conn（如通过自定义传输层创建的连接）。
 // 不会分配新的连接 ID，使用 Conn 已有的 ID。
-func (s *MessageServer) ServeConn(conn *netty.Conn) {
-	bridge := netty.NewConnectionBridge(conn, s.beanRegister)
+func (s *MessageServer) ServeConn(conn *connpkg.Conn) {
+	bridge := connpkg.NewConnectionBridge(conn, s.beanRegister)
 
 	clientID := formatClientID(conn.ConnectionID())
 	s.beanRegister.AddConnection(clientID, conn)

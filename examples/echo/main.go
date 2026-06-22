@@ -38,7 +38,7 @@ import (
 	exception "github.com/oh-marshal/protoq/basic/exception"
 	"github.com/oh-marshal/protoq/basic/message"
 	client "github.com/oh-marshal/protoq/client"
-	protoqtransport "github.com/oh-marshal/protoq/netty"
+	protoqtransport "github.com/oh-marshal/protoq/conn"
 	serverpkg "github.com/oh-marshal/protoq/server"
 )
 

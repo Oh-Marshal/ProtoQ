@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	netty "github.com/oh-marshal/protoq/netty"
+	connpkg "github.com/oh-marshal/protoq/conn"
 )
 
 // ConnContext 表示一个 ProtoQ 服务端连接上下文。
@@ -17,7 +17,7 @@ import (
 // 嵌入 Conn 获得完整的连接生命周期管理（读写、关闭、context 取消）。
 type ConnContext struct {
 	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
-	*netty.Conn
+	*connpkg.Conn
 
 	// ID 连接唯一标识（服务端内单调递增）
 	ID uint64
@@ -170,7 +170,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 // 连接的 context 派生于服务端的 context，服务端关闭时所有连接自动取消。
 func (s *Server) newConnContext(rawConn net.Conn, id uint64) *ConnContext {
 	return &ConnContext{
-		Conn:     netty.NewConn(s.ctx, rawConn),
+		Conn:     connpkg.NewConn(s.ctx, rawConn),
 		ID:       id,
 		metadata: make(map[string]interface{}),
 		server:   s,

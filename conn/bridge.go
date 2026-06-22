@@ -1,6 +1,6 @@
 // Package biz — 连接级消息桥接器
 //
-// 对标 Java uni-protocol org.facelang.unified.proto.netty.NettyMessageBridge。
+// 对标 Java uni-protocol org.facelang.unified.proto.conn.NettyMessageBridge。
 // ConnectionBridge 负责传输层与协议层的边界，管理单个连接的完整消息生命周期：
 //   - 读循环：Decode → Decrypt（跳过协商包）→ MessageDispatcher.Dispatch → requireAck 时写回响应
 //   - 写循环：PacketData → Encrypt（跳过协商包）→ Encode → 写出
@@ -8,7 +8,7 @@
 //
 // ConnectionBridge 对标 Netty 的 ChannelDuplexHandler，但 Go 中用 goroutine + channel 替代 Netty pipeline。
 // 每个 TCP 连接对应一个 ConnectionBridge 实例。
-package netty
+package conn
 
 import (
 	"fmt"

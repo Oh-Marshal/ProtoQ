@@ -103,7 +103,7 @@ protoq/
 │   │   └── handler/         ← NegotiatePayloadHandler / HeartbeatPayloadHandler
 │   └── register/            ← BeanRegister / MessageDispatcher / EventDispatcher
 │
-├── netty/                   ← 传输层实现（protocol-netty）
+├── conn/                   ← 传输层实现（protocol-netty）
 │   ├── connection.go        ← NettyConnection
 │   ├── bridge.go            ← NettyMessageBridge（读写循环）
 │   ├── decoder.go           ← NettyMessageDecoder（状态机解码）
@@ -128,7 +128,7 @@ protoq/
 
 ```go
 // 创建服务端
-server := serverpkg.NewServer(netty.NewTCPTransport())
+server := serverpkg.NewServer(conn.NewTCPTransport())
 
 // 注册协商 + 心跳 Handler（biz 层辅助）
 negotiator := &message.DefaultNegotiator{}
@@ -148,7 +148,7 @@ go server.ListenAndServe(ctx, ":9090")
 
 ```go
 // 连接 + 协商 + 心跳
-client, _ := client.Dial(ctx, netty.NewTCPTransport(), ":9090")
+client, _ := client.Dial(ctx, conn.NewTCPTransport(), ":9090")
 resp, _ := message.Negotiate(ctx, client, message.WithAuth("token"))
 stopHB := message.StartHeartbeat(client, nil)
 defer stopHB()
@@ -163,10 +163,10 @@ client.Close()
 ```go
 // 编码
 packet := protoq.NewRequestPacket(0x0001, 0x0001, []byte("data"), true, true)
-data, _ := netty.Encode(packet)
+data, _ := conn.Encode(packet)
 
 // 解码（从 io.Reader 流式读取）
-decoder := netty.NewDecoder(conn)
+decoder := conn.NewDecoder(conn)
 for {
     packet, err := decoder.DecodePacket()
     if err == io.EOF { break }

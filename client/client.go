@@ -8,16 +8,16 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	netty "github.com/oh-marshal/protoq/netty"
+	conn "github.com/oh-marshal/protoq/conn"
 )
 
 // Client 是 ProtoQ 协议客户端。
 // 支持通过 TCP 或 WebSocket 连接到服务端，发送请求和通知。
 type Client struct {
 	// Conn 共享连接抽象（嵌入），拥有连接的生命周期
-	*netty.Conn
+	*conn.Conn
 
-	seqMgr *netty.SeqManager
+	seqMgr *conn.SeqManager
 
 	// 读循环完成信号
 	readDone chan struct{}
@@ -58,8 +58,8 @@ func WithClientCRC(enable bool) ClientOption {
 // rawConn 是已建立的连接（由 Transport.Dial 返回）。
 func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
 	c := &Client{
-		Conn:      netty.NewConn(context.Background(), rawConn),
-		seqMgr:    netty.NewSeqManager(api.DefaultSeqLen),
+		Conn:      conn.NewConn(context.Background(), rawConn),
+		seqMgr:    conn.NewSeqManager(api.DefaultSeqLen),
 		readDone:  make(chan struct{}),
 		opcodeLen: api.DefaultOpcodeLen,
 		seqLen:    api.DefaultSeqLen,
@@ -68,7 +68,7 @@ func NewClient(rawConn net.Conn, opts ...ClientOption) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.seqMgr = netty.NewSeqManager(c.seqLen)
+	c.seqMgr = conn.NewSeqManager(c.seqLen)
 	c.seqMgr.SetOnRetransmit(c.retransmit)
 
 	// 启动读循环
@@ -105,7 +105,7 @@ func (c *Client) SendRequest(ctx context.Context, opcode uint32, body []byte) (*
 	c.requestsSent.Add(1)
 
 	// 等待响应
-	resp, err := netty.WaitForResponse(ctx, pr)
+	resp, err := conn.WaitForResponse(ctx, pr)
 	if err != nil {
 		c.seqMgr.Remove(seq)
 		return nil, err

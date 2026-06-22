@@ -1,4 +1,4 @@
-package netty
+package conn
 
 import (
 	api "github.com/oh-marshal/protoq"

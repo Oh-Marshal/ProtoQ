@@ -1,4 +1,4 @@
-package netty
+package conn
 
 import (
 	"bufio"
