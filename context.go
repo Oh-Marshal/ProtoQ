@@ -13,15 +13,15 @@ type Context interface {
 	// Connection 返回当前请求所属的连接。
 	Connection() Connection
 
-	// Frame 返回当前请求的解码后帧报文。
-	Frame() *Frame
+	// PacketData 返回当前请求的解码后帧报文。
+	PacketData() *PacketData
 
 	// Response 获取待回写的响应对象。
 	// 由业务 Handler 通过 context.SetResponse() 设置。
 	Response() interface{}
 
 	// SetResponse 设置待回写的响应对象。
-	// 类型可以是：nil（无响应）、*Frame（直接帧）、[]byte（二进制体）、
+	// 类型可以是：nil（无响应）、*PacketData（直接帧）、[]byte（二进制体）、
 	// 或任意业务对象（由 Converter 序列化后作为响应体）。
 	SetResponse(data interface{})
 }

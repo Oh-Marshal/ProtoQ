@@ -7,7 +7,7 @@ package protoq
 // MessageHandler 消息处理器函数签名。对标 uni-protocol @MessageHandler。
 //
 // 按 messageId（Opcode 的低字节，对应 uni-protocol 的 1 字节 messageId）分发。
-// ctx: 请求上下文（含 Connection + Frame）
+// ctx: 请求上下文（含 Connection + PacketData）
 // 返回值：响应体（[]byte），由 Bridge 编码后写回。
 type MessageHandler func(ctx Context) ([]byte, error)
 

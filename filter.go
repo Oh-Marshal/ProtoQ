@@ -12,7 +12,7 @@ package protoq
 // 抛出的异常由 ConnectionBridge 统一处理。
 type Filter interface {
 	// DoFilter 执行过滤逻辑。
-	// ctx: 当前请求上下文（含 Connection、Frame、响应载体）
+	// ctx: 当前请求上下文（含 Connection、PacketData、响应载体）
 	// chain: 过滤器链，调用 chain.DoFilter(ctx) 继续
 	DoFilter(ctx Context, chain FilterChain) error
 }

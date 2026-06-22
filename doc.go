@@ -20,7 +20,7 @@
 //   - ConnContext：服务端连接上下文（Conn + 连接 ID + 元数据）
 //   - ConnHandler：服务端请求处理函数签名
 //   - Server / Client：服务端与客户端生命周期管理
-//   - Frame / Flags / Decoder / Encoder：协议帧的编解码与表示
+//   - PacketData / Flags / Decoder / Encoder：协议帧的编解码与表示
 //   - SeqManager：序列号分配与请求-响应匹配
 //
 // 子包 transport/ 提供传输层实现（TCP、WebSocket、QUIC），

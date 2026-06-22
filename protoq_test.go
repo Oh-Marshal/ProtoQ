@@ -14,45 +14,45 @@ import (
 func TestEncodeDecode(t *testing.T) {
 	tests := []struct {
 		name   string
-		frame  *Frame
+		frame  *PacketData
 	}{
 		{
 			name:  "请求有Body有CRC",
-			frame: NewRequestFrame(0x0001, 0x0001, []byte("hello"), true, true),
+			frame: NewRequestPacket(0x0001, 0x0001, []byte("hello"), true, true),
 		},
 		{
 			name:  "响应有Body有CRC",
-			frame: NewResponseFrame(0x0001, 0x0001, []byte("world"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
+			frame: NewResponsePacket(0x0001, 0x0001, []byte("world"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
 		},
 		{
 			name:  "通知无Body无CRC",
-			frame: NewNotificationFrame(0x0002, nil, false),
+			frame: NewNotificationPacket(0x0002, nil, false),
 		},
 		{
 			name:  "请求空Body有CRC",
-			frame: NewRequestFrame(0x00FF, 0x00FF, nil, true, false),
+			frame: NewRequestPacket(0x00FF, 0x00FF, nil, true, false),
 		},
 		{
 			name: "大Body请求",
-			frame: func() *Frame {
+			frame: func() *PacketData {
 				body := make([]byte, 1024)
 				for i := range body {
 					body[i] = byte(i % 256)
 				}
-				return NewRequestFrame(0x0003, 0x0001, body, true, true)
+				return NewRequestPacket(0x0003, 0x0001, body, true, true)
 			}(),
 		},
 		{
 			name: "4字节Opcode和Seq",
-			frame: func() *Frame {
-				f := NewRequestFrame(0x12345678, 0x9ABCDEF0, []byte("data"), true, true)
+			frame: func() *PacketData {
+				f := NewRequestPacket(0x12345678, 0x9ABCDEF0, []byte("data"), true, true)
 				f.Flags = f.Flags.SetOpcodeLen(4).SetSeqLen(4)
 				return f
 			}(),
 		},
 		{
 			name:  "响应无Body",
-			frame: NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
+			frame: NewResponsePacket(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2)),
 		},
 	}
 
@@ -101,9 +101,9 @@ func TestEncodeDecode(t *testing.T) {
 // TestDecodeStickyPackets 测试粘包场景 — 多个完整帧在一次 Read 中到达
 func TestDecodeStickyPackets(t *testing.T) {
 	// 构造多个帧并拼接在一起
-	f1 := NewRequestFrame(0x0001, 0x0001, []byte("first"), true, true)
-	f2 := NewNotificationFrame(0x0002, []byte("second"), true)
-	f3 := NewResponseFrame(0x0001, 0x0001, []byte("third"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
+	f1 := NewRequestPacket(0x0001, 0x0001, []byte("first"), true, true)
+	f2 := NewNotificationPacket(0x0002, []byte("second"), true)
+	f3 := NewResponsePacket(0x0001, 0x0001, []byte("third"), Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
 
 	data1, _ := Encode(f1)
 	data2, _ := Encode(f2)
@@ -113,7 +113,7 @@ func TestDecodeStickyPackets(t *testing.T) {
 
 	decoder := NewDecoder(bytes.NewReader(combined))
 
-	frames := make([]*Frame, 0, 3)
+	frames := make([]*PacketData, 0, 3)
 	for i := 0; i < 3; i++ {
 		f, err := decoder.Decode()
 		if err != nil {
@@ -139,7 +139,7 @@ func TestDecodeStickyPackets(t *testing.T) {
 
 // TestDecodeHalfPacket 测试半包场景 — 帧被分割到多次 Read 中
 func TestDecodeHalfPacket(t *testing.T) {
-	f := NewRequestFrame(0x0001, 0x0001, []byte("half packet test data"), true, true)
+	f := NewRequestPacket(0x0001, 0x0001, []byte("half packet test data"), true, true)
 	data, _ := Encode(f)
 
 	// 使用一个自定义 reader，每次只返回少量字节
@@ -185,7 +185,7 @@ func (r *chunkedReader) Read(p []byte) (int, error) {
 
 // TestDecodeNoiseBeforeMagic 测试帧前有噪声数据（同步测试）
 func TestDecodeNoiseBeforeMagic(t *testing.T) {
-	f := NewRequestFrame(0x0001, 0x0001, []byte("data"), true, true)
+	f := NewRequestPacket(0x0001, 0x0001, []byte("data"), true, true)
 	data, _ := Encode(f)
 
 	// 在帧前添加噪声
@@ -205,7 +205,7 @@ func TestDecodeNoiseBeforeMagic(t *testing.T) {
 
 // TestCRCMismatch 测试 CRC 校验失败
 func TestCRCMismatch(t *testing.T) {
-	f := NewRequestFrame(0x0001, 0x0001, []byte("test"), true, true)
+	f := NewRequestPacket(0x0001, 0x0001, []byte("test"), true, true)
 	data, _ := Encode(f)
 
 	// 篡改 Body 中的一个字节
@@ -225,7 +225,7 @@ func TestCRCMismatch(t *testing.T) {
 // TestFlagsValidation 测试标志位验证
 func TestFlagsValidation(t *testing.T) {
 	// ACK_REQ=1 但 SEQ_LEN=0
-	f := &Frame{
+	f := &PacketData{
 		Flags:  FlagRequiresAck | FlagOpLen2 | FlagSeqLen0 | FlagCRCLen2 | FlagBodyLen,
 		Opcode: 0x0001,
 		Seq:    0,
@@ -237,7 +237,7 @@ func TestFlagsValidation(t *testing.T) {
 	}
 
 	// 响应帧中 ACK_REQ=1
-	f2 := &Frame{
+	f2 := &PacketData{
 		Flags:  FlagDir | FlagRequiresAck | FlagOpLen2 | FlagSeqLen2 | FlagCRCLen2,
 		Opcode: 0x0001,
 		Seq:    0x0001,
@@ -417,7 +417,7 @@ func TestEncoder4ByteAlignment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := NewRequestFrame(0x0001, 0x0001, []byte(tt.body), true, true)
+			f := NewRequestPacket(0x0001, 0x0001, []byte(tt.body), true, true)
 			data, err := Encode(f)
 			if err != nil {
 				t.Fatalf("Encode failed: %v", err)
@@ -432,7 +432,7 @@ func TestEncoder4ByteAlignment(t *testing.T) {
 // TestVariantB 测试变体 B（无 Body，无 Length）
 func TestVariantB(t *testing.T) {
 	// 变体 B：响应无 Body，BODY_LEN=0
-	f := NewResponseFrame(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
+	f := NewResponsePacket(0x0001, 0x0001, nil, Flags(FlagOpLen2|FlagSeqLen2|FlagCRCLen2))
 	// 确保 BODY_LEN 为 0
 	f.Flags = f.Flags.SetBodyLen(false)
 

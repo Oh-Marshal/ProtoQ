@@ -63,12 +63,12 @@ type Connection interface {
 
 	// Send 向对端发送请求并返回响应 channel（需要 ACK）。
 	// 对标 uni-protocol Connection.send(message)。
-	// 返回值：响应 Frame 的 channel，由 MessageDispatcher 在收到响应时完成。
-	Send(ctx Context, opcode uint32, body []byte) (<-chan *Frame, error)
+	// 返回值：响应 PacketData 的 channel，由 MessageDispatcher 在收到响应时完成。
+	Send(ctx Context, opcode uint32, body []byte) (<-chan *PacketData, error)
 
 	// Write 向当前连接写回一条响应消息（被动响应场景）。
 	// 对标 uni-protocol Connection.write(message)。
-	WriteFrame(frame *Frame) error
+	WritePacket(frame *PacketData) error
 
 	// Emit 向当前连接发送命名事件。
 	// 对标 uni-protocol Connection.emit(event, message)。

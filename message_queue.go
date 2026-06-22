@@ -13,17 +13,17 @@ import (
 // MessageQueue ACK 等待队列。对标 uni-protocol org.facelang.unified.proto.model.MessageQueue。
 //
 // 每个连接持有一个 MessageQueue 实例，按序列号索引等待中的请求。
-// sequence → chan *Frame 映射，完成时自动清理。
+// sequence → chan *PacketData 映射，完成时自动清理。
 type MessageQueue struct {
 	mu      sync.Mutex
-	pending map[uint32]chan *Frame
+	pending map[uint32]chan *PacketData
 	count   int
 }
 
 // NewMessageQueue 创建新的消息队列。
 func NewMessageQueue() *MessageQueue {
 	return &MessageQueue{
-		pending: make(map[uint32]chan *Frame),
+		pending: make(map[uint32]chan *PacketData),
 	}
 }
 
@@ -36,7 +36,7 @@ func (q *MessageQueue) Count() int {
 
 // Get 获取指定 sequence 的等待 channel。对标 uni-protocol MessageQueue.get(sequence)。
 // 不存在时返回 nil。
-func (q *MessageQueue) Get(seq uint32) chan *Frame {
+func (q *MessageQueue) Get(seq uint32) chan *PacketData {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.pending[seq]
@@ -45,7 +45,7 @@ func (q *MessageQueue) Get(seq uint32) chan *Frame {
 // Put 注册一个等待 ACK 的请求。对标 uni-protocol MessageQueue.put(sequence, future)。
 // 当响应到达时，由 Dispatcher 调用 Complete 完成 channel。
 // 若队列已达容量上限则返回错误。
-func (q *MessageQueue) Put(seq uint32, ch chan *Frame, capacity int) error {
+func (q *MessageQueue) Put(seq uint32, ch chan *PacketData, capacity int) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -60,7 +60,7 @@ func (q *MessageQueue) Put(seq uint32, ch chan *Frame, capacity int) error {
 
 // Complete 完成指定 sequence 的等待：向 channel 发送响应帧并从队列中移除。
 // 对标 uni-protocol MessageQueue 中 Future.complete() 的 Go channel 等价操作。
-func (q *MessageQueue) Complete(seq uint32, frame *Frame) {
+func (q *MessageQueue) Complete(seq uint32, frame *PacketData) {
 	q.mu.Lock()
 	ch, ok := q.pending[seq]
 	if ok {
